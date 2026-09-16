@@ -1,0 +1,15 @@
+name: pri-backend
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pri-backend-db
+    environment:
+      POSTGRES_USER: pri_backend
+      POSTGRES_PASSWORD: pri_backend_dev_password
+      POSTGRES_DB: pri_backend
+    ports:
+      - "5435:5432"
+    volumes:
+      - pri_backend_pg:/var/lib/postgresql/data
+volumes:
+  pri_backend_pg:
