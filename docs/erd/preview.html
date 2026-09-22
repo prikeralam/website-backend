@@ -1,0 +1,645 @@
+<title>PRI Platform Schema</title>
+<style>
+  :root {
+    --paper: #f4f6f9;
+    --surface: #ffffff;
+    --ink: #171b21;
+    --ink-soft: #4d5762;
+    --line: #d7dee6;
+    --accent: #2f5d8a;
+    --accent-soft: #e7eef6;
+    --grid-line: rgba(47, 93, 138, 0.07);
+    --mono-bg: #eef1f5;
+    --code: #26364a;
+
+    --mod-core: #5b6472;
+    --mod-a: #6952c9;
+    --mod-b: #9a3fb0;
+    --mod-c: #1f8a70;
+    --mod-d: #b5761b;
+    --mod-e: #c23b3b;
+    --mod-f: #1f8f4e;
+    --mod-g: #2b7fb0;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12161d;
+      --surface: #181d26;
+      --ink: #e8ecf2;
+      --ink-soft: #a3adba;
+      --line: #2b3341;
+      --accent: #7fb2e5;
+      --accent-soft: #1c2836;
+      --grid-line: rgba(127, 178, 229, 0.07);
+      --mono-bg: #1e2530;
+      --code: #cfe0f2;
+
+      --mod-core: #9aa4b2;
+      --mod-a: #b8a4f2;
+      --mod-b: #e19bef;
+      --mod-c: #5fd6b6;
+      --mod-d: #f0b563;
+      --mod-e: #f29c9c;
+      --mod-f: #79e0a1;
+      --mod-g: #8fd0f5;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12161d;
+    --surface: #181d26;
+    --ink: #e8ecf2;
+    --ink-soft: #a3adba;
+    --line: #2b3341;
+    --accent: #7fb2e5;
+    --accent-soft: #1c2836;
+    --grid-line: rgba(127, 178, 229, 0.07);
+    --mono-bg: #1e2530;
+    --code: #cfe0f2;
+
+    --mod-core: #9aa4b2;
+    --mod-a: #b8a4f2;
+    --mod-b: #e19bef;
+    --mod-c: #5fd6b6;
+    --mod-d: #f0b563;
+    --mod-e: #f29c9c;
+    --mod-f: #79e0a1;
+    --mod-g: #8fd0f5;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background:
+      linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 28px 28px,
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 28px 28px,
+      var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", -apple-system, sans-serif;
+    padding: 0 16px 64px;
+    line-height: 1.5;
+  }
+
+  a { color: var(--accent); }
+
+  h1, h2, h3 { font-family: "IBM Plex Sans", sans-serif; text-wrap: balance; }
+  code, .mono, .tag-list, table.cols td, table.cols th { font-family: "IBM Plex Mono", monospace; }
+
+  header {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 48px 0 28px;
+  }
+  header .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  header h1 {
+    font-size: clamp(28px, 5vw, 40px);
+    margin: 0 0 12px;
+    letter-spacing: -0.01em;
+  }
+  header p.lede {
+    max-width: 62ch;
+    color: var(--ink-soft);
+    font-size: 15.5px;
+    margin: 0 0 20px;
+  }
+  .source-note {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+  }
+  .source-note code { background: var(--mono-bg); padding: 1px 5px; border-radius: 4px; color: var(--code); }
+
+  nav.toc {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 0;
+    margin: 0 auto 8px;
+  }
+  nav.toc .row {
+    max-width: 980px;
+    margin: 0 auto;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  nav.toc .row::-webkit-scrollbar { display: none; }
+  nav.toc a {
+    flex: none;
+    text-decoration: none;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink-soft);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 6px 11px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  nav.toc a:hover { color: var(--ink); border-color: var(--accent); }
+
+  main { max-width: 980px; margin: 0 auto; }
+
+  section.module {
+    margin: 40px 0;
+    scroll-margin-top: 64px;
+  }
+
+  .module-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .chip {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: #fff;
+    padding: 3px 9px;
+    border-radius: 5px;
+  }
+  section.module h2 { font-size: 20px; margin: 0; }
+  section.module > p.desc { color: var(--ink-soft); font-size: 14.5px; max-width: 68ch; margin: 8px 0 18px; }
+
+  .diagram-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px;
+    overflow-x: auto;
+  }
+
+  .status-note {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-top: 10px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .dot.built { color: var(--mod-c); }
+  .dot.spec { color: var(--mod-d); }
+
+  table.cols {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 10px;
+  }
+  table.cols th {
+    text-align: left;
+    color: var(--ink-soft);
+    font-weight: 600;
+    border-bottom: 1px solid var(--line);
+    padding: 6px 8px;
+  }
+  table.cols td { padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  table.cols tr:last-child td { border-bottom: none; }
+
+  #overview .diagram-card { padding: 10px; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 14px;
+  }
+  .legend span.dotkey { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .dotkey i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+  footer {
+    max-width: 980px;
+    margin: 56px auto 0;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<header>
+  <p class="eyebrow">PRI Backend &middot; Design Artifact &middot; 2026-09-17</p>
+  <h1>PRI Platform Schema</h1>
+  <p class="lede">An entity-relationship map of the full PRI backend — all 8 modules (A–H), grouped as they'd sit in the Django codebase. This is a visual preview for review; the importable source of truth for Lucidchart is a SQL file sitting alongside this page.</p>
+  <div class="source-note">
+    Import into Lucidchart via <b>File → Import Data → Import from SQL</b> using
+    <code>backend/docs/erd/pri_platform_schema.sql</code>. This page mirrors that file's 29 tables and 45 foreign keys, split by module for readability.
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="row">
+    <a href="#overview">Full map</a>
+    <a href="#core">Core &amp; Roles</a>
+    <a href="#mod-a">A · CMS</a>
+    <a href="#mod-b">B · Publications</a>
+    <a href="#mod-c">C · Data Repository</a>
+    <a href="#mod-d">D · Fellowship</a>
+    <a href="#mod-e">E · Media Watch</a>
+    <a href="#mod-f">F · Donors</a>
+    <a href="#mod-g">G · Forms</a>
+  </div>
+</nav>
+
+<main>
+
+  <section class="module" id="overview">
+    <div class="module-head"><span class="chip" style="background:var(--accent)">ALL MODULES</span><h2>Full platform map</h2></div>
+    <p class="desc">Every table across the project and how the modules connect — mainly through <code>users_user</code> (creator/reviewer/actor on nearly everything) and <code>content_personprofile</code> (shared by Publications and Fellowship for author/fellow identity). Scroll horizontally on small screens.</p>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    USERS_USER ||--o{ ACCOUNTS_AUDITLOG : actor
+    USERS_USER ||--o{ CONTENT_CONTENTBLOCK : created_by
+    USERS_USER ||--o{ CONTENT_TESTIMONIAL : created_by
+    USERS_USER ||--o{ CONTENT_PERSONPROFILE : created_by
+    USERS_USER ||--o{ CONTENT_DOCUMENT : created_by
+    USERS_USER ||--o{ PROJECTS_PROJECT : created_by
+    USERS_USER ||--o{ PUBLICATIONS_PUBLICATION : created_by
+    USERS_USER ||--o{ PUBLICATIONS_PUBLICATIONVERSION : uploaded_by
+    USERS_USER ||--o{ DATAREPO_DATASET : created_by
+    USERS_USER ||--o{ DATAREPO_DASHBOARD : created_by
+    USERS_USER ||--o{ DATAREPO_ACCESSREQUEST : requests
+    USERS_USER ||--o{ FELLOWSHIP_REVIEW : reviewer
+    USERS_USER }o--o{ FELLOWSHIP_PROGRAM : "reviewer of"
+    USERS_USER ||--o{ MEDIAWATCH_MEDIACASE : flags
+    USERS_USER ||--o{ MEDIAWATCH_RESPONSE : publishes
+    USERS_USER ||--|| DONORS_DONOR : "is a"
+
+    CONTENT_PERSONPROFILE }o--o{ PUBLICATIONS_PUBLICATION : authors
+    CONTENT_PERSONPROFILE |o--o| FELLOWSHIP_APPLICATION : "onboarded from"
+
+    PUBLICATIONS_PUBLICATION ||--o{ PUBLICATIONS_PUBLICATIONVERSION : versions
+
+    DATAREPO_DATASET }o--o{ DATAREPO_DASHBOARD : "shown in"
+    DATAREPO_DATASET ||--o{ DATAREPO_ACCESSREQUEST : gates
+
+    FELLOWSHIP_PROGRAM ||--o{ FELLOWSHIP_APPLICATIONFORM : defines
+    FELLOWSHIP_PROGRAM ||--o{ FELLOWSHIP_APPLICATION : receives
+    FELLOWSHIP_APPLICATION ||--o{ FELLOWSHIP_APPLICATIONDOCUMENT : includes
+    FELLOWSHIP_APPLICATION ||--o{ FELLOWSHIP_REVIEW : reviewed_by
+
+    MEDIAWATCH_MEDIACASE ||--o{ MEDIAWATCH_RESPONSE : answered_by
+
+    DONORS_DONOR ||--o{ DONORS_DONATION : gives
+    DONORS_CAMPAIGN ||--o{ DONORS_DONATION : funds
+    DONORS_DONATIONTIER ||--o{ DONORS_DONATION : suggests
+    DONORS_DONATION ||--|| DONORS_TAXRECEIPT : generates
+
+    FORMS_FORMDEFINITION ||--o{ FORMS_FORMSUBMISSION : collects
+      </pre>
+    </div>
+    <div class="legend">
+      <span class="dotkey"><i style="background:var(--mod-core)"></i>Core / Module H</span>
+      <span class="dotkey"><i style="background:var(--mod-a)"></i>Module A · CMS</span>
+      <span class="dotkey"><i style="background:var(--mod-b)"></i>Module B · Publications</span>
+      <span class="dotkey"><i style="background:var(--mod-c)"></i>Module C · Data Repository</span>
+      <span class="dotkey"><i style="background:var(--mod-d)"></i>Module D · Fellowship</span>
+      <span class="dotkey"><i style="background:var(--mod-e)"></i>Module E · Media Watch</span>
+      <span class="dotkey"><i style="background:var(--mod-f)"></i>Module F · Donors</span>
+      <span class="dotkey"><i style="background:var(--mod-g)"></i>Module G · Forms</span>
+    </div>
+  </section>
+
+  <section class="module" id="core">
+    <div class="module-head"><span class="chip" style="background:var(--mod-core)">CORE / H</span><h2>Users, Roles &amp; Audit</h2></div>
+    <p class="desc">The one authoritative user/role table (Module H) and the shared audit trail every other module writes to. <code>workflow_status</code> (draft → in_review → approved → published → unpublished) is reused as a plain <code>CHECK</code> constraint on every content-bearing table below, rather than its own table.</p>
+    <span class="status-note"><i class="dot built"></i>Built in <code>apps/accounts</code></span>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    USERS_USER {
+        bigint id PK
+        string username
+        string email
+        string role "public | researcher | editor | fellow | admin"
+        boolean is_active
+    }
+    ACCOUNTS_AUDITLOG {
+        bigint id PK
+        bigint actor_id FK
+        string module
+        string action
+        string target
+        jsonb metadata
+        timestamptz timestamp
+    }
+    USERS_USER ||--o{ ACCOUNTS_AUDITLOG : "acted as"
+      </pre>
+    </div>
+  </section>
+
+  <section class="module" id="mod-a">
+    <div class="module-head"><span class="chip" style="background:var(--mod-a)">MODULE A</span><h2>Content Management System</h2></div>
+    <p class="desc">Four workflow-gated content types feeding the Homepage and About PRI. Every table shares the same <code>status / created_by / reviewed_by</code> shape (Django's <code>WorkflowMixin</code>).</p>
+    <span class="status-note"><i class="dot built"></i>Built in <code>apps/content</code></span>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    CONTENT_CONTENTBLOCK {
+        bigint id PK
+        string slug
+        string title
+        text body
+        string status
+        bigint created_by_id FK
+        bigint reviewed_by_id FK
+    }
+    CONTENT_TESTIMONIAL {
+        bigint id PK
+        string slug
+        text quote
+        string attribution
+        string status
+    }
+    CONTENT_PERSONPROFILE {
+        bigint id PK
+        string slug
+        string name
+        string group "team | patron | advisory | executive | fellow | past-fellow | author | partner"
+        string status
+    }
+    CONTENT_DOCUMENT {
+        bigint id PK
+        string slug
+        string title
+        string file
+        string document_type
+        int year
+        string status
+    }
+    USERS_USER ||--o{ CONTENT_CONTENTBLOCK : created_by
+    USERS_USER ||--o{ CONTENT_TESTIMONIAL : created_by
+    USERS_USER ||--o{ CONTENT_PERSONPROFILE : created_by
+    USERS_USER ||--o{ CONTENT_DOCUMENT : created_by
+      </pre>
+    </div>
+    <table class="cols">
+      <tr><th>Table</th><th>Note</th></tr>
+      <tr><td>content_personprofile</td><td><code>group</code> is one tagged model shared by governance members, authors (Module B) and fellows (Module D) — not split into separate tables.</td></tr>
+      <tr><td>content_document</td><td><code>document_type</code> / <code>year</code> added beyond current code — needed by Module F's report listings.</td></tr>
+    </table>
+  </section>
+
+  <section class="module" id="mod-b">
+    <div class="module-head"><span class="chip" style="background:var(--mod-b)">MODULE B</span><h2>Publication Repository</h2></div>
+    <p class="desc">Formal, versioned, citable research output — separate from Module A's simpler content blocks. Authors link to Module A's <code>PersonProfile</code>, not a duplicate author table.</p>
+    <span class="status-note"><i class="dot built"></i>Base fields built in <code>apps/publications</code> &nbsp;·&nbsp; <i class="dot spec"></i>Versioning/tags/DOI are spec-only</span>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    PUBLICATIONS_PUBLICATION {
+        bigint id PK
+        string slug
+        string title
+        string format "report | working_paper | brief | explainer | infographic | video | data_story"
+        string external_id "DOI or internal slug"
+        string visibility "public | private"
+        text_array tags
+        string status
+    }
+    PUBLICATIONS_PUBLICATIONVERSION {
+        bigint id PK
+        bigint publication_id FK
+        int version_number
+        string file
+        boolean is_current
+        bigint uploaded_by_id FK
+    }
+    CONTENT_PERSONPROFILE {
+        bigint id PK
+        string name
+    }
+    PUBLICATIONS_PUBLICATION ||--o{ PUBLICATIONS_PUBLICATIONVERSION : "has versions"
+    PUBLICATIONS_PUBLICATION }o--o{ CONTENT_PERSONPROFILE : "authored by"
+    USERS_USER ||--o{ PUBLICATIONS_PUBLICATION : created_by
+      </pre>
+    </div>
+  </section>
+
+  <section class="module" id="mod-c">
+    <div class="module-head"><span class="chip" style="background:var(--mod-c)">MODULE C</span><h2>Data Repository &amp; Dashboards</h2></div>
+    <p class="desc"><b>Built natively in Django</b> — the earlier CKAN + Next.js/Prisma "Module C v0" plan is dropped. Three-tier visibility (<code>public / on_request / internal_only</code>) is enforced server-side; <code>AccessRequest</code> is the approve/deny queue for gated datasets.</p>
+    <span class="status-note"><i class="dot spec"></i>Spec-only — no <code>apps/datarepo</code> app yet</span>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    DATAREPO_DATASET {
+        bigint id PK
+        string slug
+        string format "csv | xlsx | geojson | spss"
+        string theme
+        string geography
+        int year
+        string visibility "public | on_request | internal_only"
+        string status
+    }
+    DATAREPO_DASHBOARD {
+        bigint id PK
+        string slug
+        string embed_type "datawrapper | tableau | d3"
+        string theme
+        string status
+    }
+    DATAREPO_ACCESSREQUEST {
+        bigint id PK
+        bigint user_id FK
+        bigint dataset_id FK
+        string status "pending | approved | denied"
+        timestamptz requested_at
+    }
+    DATAREPO_DATASET }o--o{ DATAREPO_DASHBOARD : "shown in"
+    DATAREPO_DATASET ||--o{ DATAREPO_ACCESSREQUEST : gates
+    USERS_USER ||--o{ DATAREPO_ACCESSREQUEST : requests
+    USERS_USER ||--o{ DATAREPO_DATASET : created_by
+      </pre>
+    </div>
+    <table class="cols">
+      <tr><th>Visibility tier</th><th>Behavior</th></tr>
+      <tr><td>public</td><td>Listed, previewable, downloadable by anyone.</td></tr>
+      <tr><td>on_request</td><td>Listed with metadata; download requires an <code>approved</code> AccessRequest for that user.</td></tr>
+      <tr><td>internal_only</td><td>Excluded entirely from any non-staff response — not just download-gated.</td></tr>
+    </table>
+  </section>
+
+  <section class="module" id="mod-d">
+    <div class="module-head"><span class="chip" style="background:var(--mod-d)">MODULE D</span><h2>Fellowship &amp; Internship</h2></div>
+    <p class="desc">Configurable per-program application forms, a review pipeline, and a one-way sync into Module A's <code>PersonProfile</code> at onboarding. The "Reviewer" role is modeled as an annotation on top of the five base roles (Module H's pattern), not a sixth global role.</p>
+    <span class="status-note"><i class="dot spec"></i>Spec-only — future phase</span>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    FELLOWSHIP_PROGRAM {
+        bigint id PK
+        string slug
+        boolean is_active
+    }
+    FELLOWSHIP_APPLICATIONFORM {
+        bigint id PK
+        bigint program_id FK
+        jsonb field_schema
+        int version
+    }
+    FELLOWSHIP_APPLICATION {
+        bigint id PK
+        bigint program_id FK
+        string status "submitted | under_review | shortlisted | rejected | accepted | onboarded"
+        bigint onboarded_profile_id FK
+    }
+    FELLOWSHIP_APPLICATIONDOCUMENT {
+        bigint id PK
+        bigint application_id FK
+        string label
+    }
+    FELLOWSHIP_REVIEW {
+        bigint id PK
+        bigint application_id FK
+        bigint reviewer_id FK
+        int score
+    }
+    FELLOWSHIP_PROGRAMREVIEWER {
+        bigint id PK
+        bigint user_id FK
+        bigint program_id FK
+    }
+    FELLOWSHIP_PROGRAM ||--o{ FELLOWSHIP_APPLICATIONFORM : defines
+    FELLOWSHIP_PROGRAM ||--o{ FELLOWSHIP_APPLICATION : receives
+    FELLOWSHIP_APPLICATION ||--o{ FELLOWSHIP_APPLICATIONDOCUMENT : includes
+    FELLOWSHIP_APPLICATION ||--o{ FELLOWSHIP_REVIEW : reviewed_by
+    FELLOWSHIP_APPLICATION |o--o| CONTENT_PERSONPROFILE : "onboards to"
+    USERS_USER ||--o{ FELLOWSHIP_REVIEW : reviewer
+    USERS_USER }o--o{ FELLOWSHIP_PROGRAM : "reviewer of"
+      </pre>
+    </div>
+  </section>
+
+  <section class="module" id="mod-e">
+    <div class="module-head"><span class="chip" style="background:var(--mod-e)">MODULE E</span><h2>Media Watch &amp; Rapid Response</h2></div>
+    <p class="desc">A case only reaches the public API once <code>status = public</code> — which requires both a confirmed classification <em>and</em> a published <code>Response</code>. That two-part gate is the module's core correctness guarantee.</p>
+    <span class="status-note"><i class="dot spec"></i>Spec-only — future phase</span>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    MEDIAWATCH_MEDIACASE {
+        bigint id PK
+        string item_type "image | text | video"
+        string classification "hate_speech | misinformation | communal_bias | other"
+        string status "flagged | under_review | confirmed | public"
+        bigint flagged_by_id FK
+        bigint reviewed_by_id FK
+    }
+    MEDIAWATCH_RESPONSE {
+        bigint id PK
+        bigint case_id FK
+        string type "rebuttal | op_ed | explainer | press_statement | toolkit"
+        bigint published_by_id FK
+        timestamptz published_at
+    }
+    MEDIAWATCH_MEDIACASE ||--o{ MEDIAWATCH_RESPONSE : "answered by"
+    USERS_USER ||--o{ MEDIAWATCH_MEDIACASE : flags
+    USERS_USER ||--o{ MEDIAWATCH_RESPONSE : publishes
+      </pre>
+    </div>
+  </section>
+
+  <section class="module" id="mod-f">
+    <div class="module-head"><span class="chip" style="background:var(--mod-f)">MODULE F</span><h2>Donor &amp; Fundraising</h2></div>
+    <p class="desc">Money flows one way: a <code>Donation</code> only becomes <code>succeeded</code> from an authenticated payment-gateway webhook, never a client call — and a <code>TaxReceipt</code> is generated only from a genuinely succeeded donation.</p>
+    <span class="status-note"><i class="dot spec"></i>Spec-only — future phase</span>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    DONORS_DONOR {
+        bigint id PK
+        bigint user_id FK
+        string name
+    }
+    DONORS_CAMPAIGN {
+        bigint id PK
+        string slug
+        numeric goal_amount
+        boolean is_active
+    }
+    DONORS_DONATIONTIER {
+        bigint id PK
+        string label
+        numeric suggested_amount
+    }
+    DONORS_DONATION {
+        bigint id PK
+        bigint donor_id FK
+        bigint campaign_id FK
+        bigint tier_id FK
+        numeric amount
+        string payment_gateway "razorpay | instamojo"
+        string status "pending | succeeded | failed"
+    }
+    DONORS_TAXRECEIPT {
+        bigint id PK
+        bigint donation_id FK
+        string receipt_number
+    }
+    USERS_USER ||--|| DONORS_DONOR : "is a"
+    DONORS_DONOR ||--o{ DONORS_DONATION : gives
+    DONORS_CAMPAIGN ||--o{ DONORS_DONATION : funds
+    DONORS_DONATIONTIER ||--o{ DONORS_DONATION : suggests
+    DONORS_DONATION ||--|| DONORS_TAXRECEIPT : generates
+      </pre>
+    </div>
+  </section>
+
+  <section class="module" id="mod-g">
+    <div class="module-head"><span class="chip" style="background:var(--mod-g)">MODULE G</span><h2>Forms, Surveys &amp; Contact</h2></div>
+    <p class="desc">One generic engine, many form instances — newsletter, volunteer, event registration, whistleblower, etc. are all <code>FormDefinition</code> rows, not separate tables. <code>anonymous_allowed</code> forms leave <code>submitter_*</code> columns null at write time, not merely hidden later.</p>
+    <span class="status-note"><i class="dot spec"></i>Spec-only — future phase</span>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    FORMS_FORMDEFINITION {
+        bigint id PK
+        string slug
+        jsonb field_schema
+        jsonb routing_rule
+        boolean anonymous_allowed
+    }
+    FORMS_FORMSUBMISSION {
+        bigint id PK
+        bigint form_id FK
+        jsonb data
+        boolean is_anonymous
+        string submitter_email "null when anonymous"
+    }
+    FORMS_FORMDEFINITION ||--o{ FORMS_FORMSUBMISSION : collects
+      </pre>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  29 tables · 45 foreign keys · grounded in <code>apps/*/models.py</code> where built, and the Module A–H PRDs (<code>front end/docs/PRDs/backend/</code>) elsewhere. Module C reflects the 2026-09-17 decision to build the data repository natively in Django rather than on CKAN.
+</footer>

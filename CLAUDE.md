@@ -2,19 +2,20 @@
 
 ## What this is
 
-Django + Django REST Framework backend for **PRI** (Policy and Research Initiative). It serves everything on the org's digital platform except the Data Repository: a CMS for content (content blocks, testimonials, team/people profiles, documents), Projects, Research Publications, and a Users/Roles/Audit-log system (Module H).
+Django + Django REST Framework backend for **PRI** (Policy and Research Initiative). It serves everything on the org's digital platform: a CMS for content (content blocks, testimonials, team/people profiles, documents), Projects, Research Publications (Module B), the Data Repository & Dashboards (Module C — datasets, dashboards, access requests), a shared Theme taxonomy, and a Users/Roles/Audit-log system (Module H). Modules D (Fellowship), E (Media Watch), F (Donors), G (Forms) are not built — each is still headed "Future phase" in its own PRD.
 
-It deliberately does **not** own datasets or CKAN integration — that "Data Repository & Dashboard Integration" module (Module C) is CKAN-backed and lives in the separate Next.js frontend repo (`Website`), with its own Prisma/Postgres thin API layer in front of CKAN. This backend is not aware of that system and should not duplicate it.
+The full v1 API contract for the built modules (A/B/C/H) — endpoints, permission rules, filters, and what's cited to which PRD line vs. proposed — lives in `docs/api/*.md`; treat it as the source of truth for what the API should expose, ahead of `apps/*/views.py` for "why" a given endpoint exists.
 
 Nothing consumes this API yet. It is built ahead of a future integration pass with a Next.js frontend — kept clean and correct, not speculatively extensible beyond what's specified here.
 
 ## Tech stack
 
-- **Framework:** Django + Django REST Framework
-- **Auth:** SimpleJWT (`djangorestframework-simplejwt`) — `/api/token/`, `/api/token/refresh/`
+- **Framework:** Django + Django REST Framework, API versioned under `/api/v1/`
+- **Auth:** SimpleJWT (`djangorestframework-simplejwt`) — `/api/v1/token/`, `/api/v1/token/refresh/`
 - **Database:** PostgreSQL, run locally via Docker Compose
 - **Config:** `django-environ`, loaded from `.env` (gitignored; see `.env.example` for the shape)
-- **Filtering:** `django-filter`, wired as DRF's default filter backend
+- **Filtering:** `django-filter`, wired as DRF's default filter backend; `?q=` search (`SEARCH_PARAM`) on publications/datasets. DRF's `?format=` content-negotiation override is disabled (`URL_FORMAT_OVERRIDE: None`) since it collided with Module B's citation endpoint's own `?format=bibtex|ris|apa` param.
+- **File storage:** local disk (`FileSystemStorage`) unless `AWS_STORAGE_BUCKET_NAME` is set in `.env`, in which case `django-storages`' `S3Storage` is used instead (works for AWS S3 or DigitalOcean Spaces via `AWS_S3_ENDPOINT_URL`) — see `config/settings.py`.
 - **CORS:** `django-cors-headers`, allowing `http://localhost:3000` (the companion Next.js frontend's dev port)
 
 ## Running locally
@@ -39,13 +40,13 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-Admin site is at `/admin/`. API is mounted under `/api/`.
+Admin site is at `/admin/`. API is mounted under `/api/v1/`.
 
 ## Architectural decisions
 
 ### Shared workflow mixin
 
-Every content type (`ContentBlock`, `Testimonial`, `PersonProfile`, `Document`, `Project`, `Publication`) inherits an abstract `WorkflowMixin` (`apps/workflow/models.py`) carrying a `status` field with five states:
+Every content type (`ContentBlock`, `Testimonial`, `PersonProfile`, `Document`, `Project`, `Publication`, `Dataset`, `Dashboard`) inherits an abstract `WorkflowMixin` (`apps/workflow/models.py`) carrying a `status` field with five states, plus a `published_at` timestamp set the first time an object reaches `published` (used to order Module A's `/updates/latest/` feed):
 
 ```
 draft -> in_review -> approved -> published -> unpublished
@@ -65,9 +66,9 @@ The 5-role enum (`public`, `researcher`, `editor`, `fellow`, `admin`) in `apps/a
 
 **Note:** `public` is used (not `donor`), even though it represents a donor/visitor account — again, purely to match the frontend's existing enum value.
 
-### Datasets/CKAN out of scope
+### Module C (datasets/dashboards) is native Django, not CKAN
 
-This backend does not model datasets, dashboards, or anything CKAN-related. That is Module C, owned entirely by the frontend repo's own API layer (`app/api/datasets/*`, Prisma) sitting in front of a separate `pri-ckan` CKAN deployment. Do not add dataset models here.
+Module C was originally planned to be CKAN-backed (`app/api/datasets/*` in the `Website` repo, per the PRD's 2026-09-15 amendment), then reversed back to native Django (2026-09-19 amendment) and built here as `apps/datarepo` (2026-09-21): `Dataset`, `Dashboard`, `AccessRequest` models, three-tier visibility (`public`/`on_request`/`internal_only`, enforced in `apps/datarepo/permissions.py` — `internal_only` is genuinely invisible to non-`researcher`/`editor`/`admin` roles, not just download-gated), an `AccessRequest` approve/deny workflow (`GET`/`PATCH /api/v1/access-requests/...`), and table-preview (`GET /datasets/{slug}/preview/table/`, CSV only so far — `parquet`/`zip` return `501` pending a real decision) rather than raw file downloads. Map preview (`preview/map/`) is also a `501` stub — the PRD wants one, but the committed `format` choices (`csv`/`parquet`/`zip`) have no spatial format yet; needs a real decision before it can be built. `pri-ckan` is decommissioned per the amendment; it isn't referenced by this backend.
 
 ### No frontend integration yet
 
@@ -75,4 +76,6 @@ This is a backend-only build. All endpoints require authentication by default (`
 
 ## Changelog
 
+- **2026-09-21** — Drafted the v1 API contract (`docs/api/*.md`, one doc per module A/B/C/H plus a shared README of conventions) grounded in the ERD and the 8 PRDs (copied into `docs/PRDs/`), then implemented it: versioned every endpoint under `/api/v1/`; added `apps/taxonomy` (shared `Theme` lookup, seeded with the canonical 8 values, FK'd from `Publication` and `Dataset`); added `published_at` to `WorkflowMixin` and wired `GET /updates/latest/` (Module A's cross-type feed); extended `Document` (`document_type`/`year` filters), `Publication` (versioning via `PublicationVersion`, `visibility` toggle, `external_id`, `tags`, 7-value `format`, citation export at `/citation/?format=bibtex|ris|apa`); and built `apps/datarepo` from scratch for Module C (`Dataset`/`Dashboard`/`AccessRequest`, three-tier visibility enforcement, CSV table preview, access-request review queue). Added conditional S3-compatible file storage (`django-storages`, on when `AWS_STORAGE_BUCKET_NAME` is set, local disk otherwise) and DRF pagination/search defaults. 34 new tests across `apps/content`, `apps/publications`, `apps/datarepo`, weighted toward each PRD's own stated highest-risk guarantee (workflow-transition permissions for A, the private-publication visibility toggle for B, the three-tier dataset visibility leak check for C). Modules D/E/F/G remain undrafted and unbuilt — each is still "Future phase" in its own PRD.
+- **2026-09-17** — Designed a full-project ER schema (`docs/erd/pri_platform_schema.sql`, `docs/erd/README.md`) covering all 8 backend modules (A–H), not just what's built, so the remaining modules (C–H) have an agreed target data model before implementation starts. Decided Module C (Data Repository & Dashboards) will be built natively in this Django backend instead of CKAN — dropping the CKAN/Prisma-thin-layer plan from the PRD's 2026-09-15 amendment; see the updated "Module C is native Django, not CKAN" section above.
 - **2026-09-16** — Initial project setup: gitignore, README, CLAUDE.md, scaffolded Django+DRF project (`config/`, `apps/workflow|accounts|content|projects|publications`), Postgres via Docker Compose on port 5435, JWT auth, role-gated workflow mixin, audit log. See README for run instructions.

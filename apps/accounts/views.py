@@ -1,4 +1,5 @@
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import BasePermission, IsAuthenticated
@@ -7,6 +8,8 @@ from rest_framework.views import APIView
 
 from .models import AuditLog, User
 from .serializers import AuditLogSerializer, MyRoleSerializer, RoleUpdateSerializer
+
+MODULE_TAG = "Module H — Users & Roles"
 
 
 class IsAdmin(BasePermission):
@@ -17,6 +20,7 @@ class IsAdmin(BasePermission):
 class MyRoleView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(tags=[MODULE_TAG], responses=MyRoleSerializer)
     def get(self, request):
         serializer = MyRoleSerializer(request.user)
         return Response(serializer.data)
@@ -25,6 +29,7 @@ class MyRoleView(APIView):
 class UserRoleUpdateView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]
 
+    @extend_schema(tags=[MODULE_TAG], request=RoleUpdateSerializer, responses=MyRoleSerializer)
     def patch(self, request, pk):
         serializer = RoleUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -50,6 +55,7 @@ class UserRoleUpdateView(APIView):
         return Response(MyRoleSerializer(target_user).data)
 
 
+@extend_schema(tags=[MODULE_TAG])
 class AuditLogListView(ListAPIView):
     queryset = AuditLog.objects.all()
     serializer_class = AuditLogSerializer

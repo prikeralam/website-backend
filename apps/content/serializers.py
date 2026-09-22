@@ -28,6 +28,14 @@ class ContentBlockSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class LatestUpdateItemSerializer(serializers.Serializer):
+    type = serializers.CharField()
+    id = serializers.IntegerField()
+    slug = serializers.CharField()
+    title = serializers.CharField()
+    published_at = serializers.DateTimeField()
+
+
 class TestimonialSerializer(serializers.ModelSerializer):
     class Meta:
         model = Testimonial
@@ -83,6 +91,8 @@ class DocumentSerializer(serializers.ModelSerializer):
             "title",
             "file",
             "description",
+            "document_type",
+            "year",
             "status",
             "created_by",
             "reviewed_by",

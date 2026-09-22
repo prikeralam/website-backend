@@ -26,6 +26,6 @@ class PersonProfileAdmin(admin.ModelAdmin):
 
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
-    list_display = ("title", "slug", "status", "created_by", "updated_at")
-    list_filter = ("status",)
+    list_display = ("title", "slug", "document_type", "year", "status", "created_by", "updated_at")
+    list_filter = ("status", "document_type", "year")
     search_fields = ("title", "slug")

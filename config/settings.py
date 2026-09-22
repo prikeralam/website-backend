@@ -29,14 +29,18 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "rest_framework",
     "rest_framework_simplejwt",
+    "drf_spectacular",
     "corsheaders",
     "django_filters",
     "apps.accounts",
+    "apps.taxonomy",
     "apps.content",
     "apps.projects",
     "apps.publications",
+    "apps.datarepo",
 ]
 
 MIDDLEWARE = [
@@ -114,6 +118,20 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# S3-compatible object storage (AWS S3 or DigitalOcean Spaces) — used when configured,
+# falls back to local disk (Django's default FileSystemStorage) otherwise so local dev
+# keeps working without real bucket credentials.
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="")
+if AWS_STORAGE_BUCKET_NAME:
+    AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="")
+    AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default="")
+    AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default=None)
+    AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default=None)
+    STORAGES = {
+        "default": {"BACKEND": "storages.backends.s3.S3Storage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
@@ -129,6 +147,30 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
     ),
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
+    "SEARCH_PARAM": "q",
+    # Disabled: DRF reserves `?format=` for content-negotiation (picking a renderer), which
+    # collides with Module B's citation endpoint using `?format=bibtex|ris|apa` for its own
+    # purpose (per PRD B). Nothing in this project relies on ?format=json-style negotiation.
+    "URL_FORMAT_OVERRIDE": None,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "PRI Backend API",
+    "DESCRIPTION": "v1 API for the PRI platform — see docs/api/*.md for the module-by-module contract.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    # Explicit order (Swagger UI otherwise sorts tags alphabetically); mirrors docs/api/*.md.
+    "TAGS": [
+        {"name": "Module H — Users & Roles"},
+        {"name": "Shared — Taxonomy"},
+        {"name": "Module A — Content"},
+        {"name": "Projects (Homepage)"},
+        {"name": "Module B — Publications"},
+        {"name": "Module C — Data Repository"},
+    ],
 }
 
 

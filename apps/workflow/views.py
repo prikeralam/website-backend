@@ -1,7 +1,9 @@
+from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from .models import WorkflowStatus
 from .permissions import CanTransitionStatus
 from .serializers import TransitionSerializer
 
@@ -20,7 +22,7 @@ class WorkflowViewSetMixin:
         return super().get_permissions()
 
     @action(detail=True, methods=["post"], url_path="transition")
-    def transition(self, request, pk=None):
+    def transition(self, request, *args, **kwargs):
         # Imported here (not at module level) to avoid a circular import:
         # apps.accounts never imports apps.workflow, so this is safe at
         # call time even though workflow is a lower-level/shared app.
@@ -32,9 +34,13 @@ class WorkflowViewSetMixin:
         target_status = serializer.validated_data["status"]
         previous_status = obj.status
 
+        update_fields = ["status", "reviewed_by", "updated_at"]
         obj.status = target_status
         obj.reviewed_by = request.user
-        obj.save(update_fields=["status", "reviewed_by", "updated_at"])
+        if target_status == WorkflowStatus.PUBLISHED:
+            obj.published_at = timezone.now()
+            update_fields.append("published_at")
+        obj.save(update_fields=update_fields)
 
         AuditLog.objects.create(
             actor=request.user,

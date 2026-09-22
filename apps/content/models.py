@@ -10,6 +10,13 @@ class ContentBlock(WorkflowMixin):
     seo_title = models.CharField(max_length=200, blank=True)
     seo_description = models.CharField(max_length=300, blank=True)
 
+    def save(self, *args, **kwargs):
+        if not self.seo_title:
+            self.seo_title = self.title[:200]
+        if not self.seo_description:
+            self.seo_description = self.body[:297] + "..." if len(self.body) > 300 else self.body
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.title
 
@@ -51,6 +58,8 @@ class Document(WorkflowMixin):
     title = models.CharField(max_length=200)
     file = models.FileField(upload_to="documents/")
     description = models.TextField(blank=True)
+    document_type = models.CharField(max_length=50, blank=True)
+    year = models.IntegerField(null=True, blank=True)
 
     def __str__(self):
         return self.title
