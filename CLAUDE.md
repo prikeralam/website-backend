@@ -79,3 +79,17 @@ This is a backend-only build. All endpoints require authentication by default (`
 - **2026-09-21** — Drafted the v1 API contract (`docs/api/*.md`, one doc per module A/B/C/H plus a shared README of conventions) grounded in the ERD and the 8 PRDs (copied into `docs/PRDs/`), then implemented it: versioned every endpoint under `/api/v1/`; added `apps/taxonomy` (shared `Theme` lookup, seeded with the canonical 8 values, FK'd from `Publication` and `Dataset`); added `published_at` to `WorkflowMixin` and wired `GET /updates/latest/` (Module A's cross-type feed); extended `Document` (`document_type`/`year` filters), `Publication` (versioning via `PublicationVersion`, `visibility` toggle, `external_id`, `tags`, 7-value `format`, citation export at `/citation/?format=bibtex|ris|apa`); and built `apps/datarepo` from scratch for Module C (`Dataset`/`Dashboard`/`AccessRequest`, three-tier visibility enforcement, CSV table preview, access-request review queue). Added conditional S3-compatible file storage (`django-storages`, on when `AWS_STORAGE_BUCKET_NAME` is set, local disk otherwise) and DRF pagination/search defaults. 34 new tests across `apps/content`, `apps/publications`, `apps/datarepo`, weighted toward each PRD's own stated highest-risk guarantee (workflow-transition permissions for A, the private-publication visibility toggle for B, the three-tier dataset visibility leak check for C). Modules D/E/F/G remain undrafted and unbuilt — each is still "Future phase" in its own PRD.
 - **2026-09-17** — Designed a full-project ER schema (`docs/erd/pri_platform_schema.sql`, `docs/erd/README.md`) covering all 8 backend modules (A–H), not just what's built, so the remaining modules (C–H) have an agreed target data model before implementation starts. Decided Module C (Data Repository & Dashboards) will be built natively in this Django backend instead of CKAN — dropping the CKAN/Prisma-thin-layer plan from the PRD's 2026-09-15 amendment; see the updated "Module C is native Django, not CKAN" section above.
 - **2026-09-16** — Initial project setup: gitignore, README, CLAUDE.md, scaffolded Django+DRF project (`config/`, `apps/workflow|accounts|content|projects|publications`), Postgres via Docker Compose on port 5435, JWT auth, role-gated workflow mixin, audit log. See README for run instructions.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues tracked via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical 5-role triage vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout (`CONTEXT.md` and `docs/adr/` at repo root). See `docs/agents/domain.md`.
