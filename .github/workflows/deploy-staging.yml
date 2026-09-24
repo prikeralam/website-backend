@@ -1,0 +1,107 @@
+name: Deploy staging
+
+# Merge to `staging` = tests -> build image -> deploy to the staging EC2 instance.
+# Secrets live in the `staging` GitHub Environment; see docs/deploy/aws-provisioning.md.
+
+on:
+  push:
+    branches: [staging]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=${repo}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          # The tree hash is identical for staging and the merge into main, so production can
+          # find and promote exactly the image that was tested here.
+          echo "tree_image=${repo}:tree-$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.tree_image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      IMAGE: ${{ needs.build.outputs.image }}
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+      EC2_SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+      APP_ENV_FILE: ${{ secrets.APP_ENV_FILE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets
+        run: |
+          missing=0
+          for name in EC2_HOST EC2_USER EC2_SSH_KEY EC2_SSH_KNOWN_HOSTS APP_ENV_FILE; do
+            if [ -z "${!name}" ]; then echo "::error::Secret $name is not set in the staging environment"; missing=1; fi
+          done
+          [ "$missing" = 0 ]
+          # The env file must describe staging, never another environment (CONTRIBUTING.md §5).
+          printf '%s\n' "$APP_ENV_FILE" | grep -qx 'ENVIRONMENT=staging' \
+            || { echo "::error::APP_ENV_FILE must contain ENVIRONMENT=staging"; exit 1; }
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$EC2_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          {
+            echo "Host target"
+            echo "  HostName $EC2_HOST"
+            echo "  User $EC2_USER"
+            echo "  IdentityFile ~/.ssh/id_deploy"
+            echo "  StrictHostKeyChecking yes"
+            echo "  BatchMode yes"
+          } > ~/.ssh/config
+
+      - name: Upload deploy files
+        run: |
+          { printf '%s\n' "$APP_ENV_FILE"; echo "IMAGE=$IMAGE"; } > .env.new
+          scp deploy/docker-compose.staging.yml target:/opt/pri-backend/docker-compose.yml
+          scp deploy/nginx.conf.template deploy/remote-deploy.sh .env.new target:/opt/pri-backend/
+
+      - name: Log the server in to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | ssh target "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+
+      - name: Deploy
+        run: ssh target "bash /opt/pri-backend/remote-deploy.sh"
