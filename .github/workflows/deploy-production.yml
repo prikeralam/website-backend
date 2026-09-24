@@ -1,0 +1,148 @@
+name: Deploy production
+
+# Merge to `main` = tests -> image (promoted from staging if it was already built there) ->
+# manual approval -> RDS snapshot -> deploy to the prod EC2 instance -> tag + GitHub Release.
+# Secrets live in the `production` GitHub Environment; see docs/deploy/aws-provisioning.md.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      promoted: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=${repo}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "tree_image=${repo}:tree-$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Was this exact tree already built on staging?
+        id: check
+        run: |
+          if docker buildx imagetools inspect "${{ steps.meta.outputs.tree_image }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Promote the image tested on staging (no rebuild)
+        if: steps.check.outputs.exists == 'true'
+        run: docker buildx imagetools create --tag "${{ steps.meta.outputs.image }}" "${{ steps.meta.outputs.tree_image }}"
+      - name: Build (hotfix or unstaged change; nothing to promote)
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.tree_image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    # Required reviewers on this environment are the manual gate before anything touches prod.
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check AWS settings
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          RDS_INSTANCE_ID: ${{ vars.RDS_INSTANCE_ID }}
+        run: |
+          [ -n "$AWS_ROLE_ARN" ] || { echo "::error::Secret AWS_ROLE_ARN is not set in the production environment"; exit 1; }
+          [ -n "$AWS_REGION" ] || { echo "::error::Variable AWS_REGION is not set in the production environment"; exit 1; }
+          [ -n "$RDS_INSTANCE_ID" ] || { echo "::error::Variable RDS_INSTANCE_ID is not set in the production environment"; exit 1; }
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # CONTRIBUTING.md section 7: back up prod Postgres before every deploy, since any release may migrate.
+      - name: Snapshot the production database
+        env:
+          RDS_INSTANCE_ID: ${{ vars.RDS_INSTANCE_ID }}
+        timeout-minutes: 45
+        run: |
+          snapshot="pri-predeploy-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA::7}"
+          aws rds create-db-snapshot --db-instance-identifier "$RDS_INSTANCE_ID" --db-snapshot-identifier "$snapshot"
+          aws rds wait db-snapshot-available --db-snapshot-identifier "$snapshot"
+          echo "Snapshot $snapshot is available" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: ./.github/actions/ssh-deploy
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          user: ${{ secrets.EC2_USER }}
+          ssh-key: ${{ secrets.EC2_SSH_KEY }}
+          known-hosts: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+          app-env-file: ${{ secrets.APP_ENV_FILE }}
+          expected-environment: production
+          compose-file: deploy/docker-compose.prod.yml
+          image: ${{ needs.image.outputs.image }}
+          ghcr-user: ${{ github.actor }}
+          ghcr-token: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    needs: [image, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag and publish a release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ needs.image.outputs.image }}
+          PROMOTED: ${{ needs.image.outputs.promoted }}
+        run: |
+          git fetch --tags --force
+          last=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)
+          if [ -z "$last" ]; then
+            next=v0.1.0
+          else
+            IFS=. read -r major minor patch <<< "${last#v}"
+            # Pre-1.0 Conventional Commits: any feat since the last tag bumps minor, everything else patch.
+            if git log --no-merges --format=%s "$last..HEAD" | grep -qE '^feat(\(.*\))?!?:'; then
+              next="v${major}.$((minor + 1)).0"
+            else
+              next="v${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+          source="built fresh on main"
+          [ "$PROMOTED" = true ] && source="promoted from the image tested on staging"
+          gh release create "$next" --target "$GITHUB_SHA" --title "$next" --generate-notes \
+            --notes "Image: \`$IMAGE\` ($source)"
