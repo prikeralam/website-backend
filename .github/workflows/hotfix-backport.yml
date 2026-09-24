@@ -1,0 +1,68 @@
+name: Hotfix backport
+
+# CONTRIBUTING.md section 1: a hotfix goes fix/* -> main, then the same fix must be backported
+# to staging and dev so the next promotion doesn't lose it (or re-break prod).
+# When a fix/* PR is merged into main, open a backport PR into staging and into dev.
+#
+# PRs opened with the default GITHUB_TOKEN do not trigger other workflows, so CI would never run
+# on them. Set a BACKPORT_TOKEN repository secret (fine-grained PAT with contents and
+# pull-requests write on this repo) to make CI run; without it, close and reopen each backport PR.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  backport:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.BACKPORT_TOKEN || secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BACKPORT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Open backport PRs for a hotfix merge
+        run: |
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.base.ref == "main" and (.head.ref | startswith("fix/")))][0].number // empty')
+          if [ -z "$pr" ]; then
+            echo "Not a hotfix merge (no fix/* PR into main for this commit); nothing to backport."
+            exit 0
+          fi
+          title=$(gh pr view "$pr" --json title --jq .title)
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # A merge commit needs -m 1 to cherry-pick; a squash or rebase commit doesn't.
+          pick_flags=""
+          [ "$(git rev-list --parents -n1 "$GITHUB_SHA" | wc -w)" -gt 2 ] && pick_flags="-m 1"
+
+          for target in staging dev; do
+            branch="backport/$pr-to-$target"
+            if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+              echo "$branch already exists; skipping."
+              continue
+            fi
+            git checkout -q -B "$branch" "origin/$target"
+            # shellcheck disable=SC2086
+            if git cherry-pick $pick_flags "$GITHUB_SHA"; then
+              git push origin "$branch"
+              gh pr create --base "$target" --head "$branch" \
+                --title "fix: backport #$pr to $target" \
+                --body "Backport of hotfix #$pr (\`$title\`) from main so \`$target\` doesn't lose it on the next promotion."
+            else
+              git cherry-pick --abort
+              gh issue create \
+                --title "Backport hotfix #$pr to $target needs manual resolution" \
+                --label needs-triage \
+                --body "Cherry-picking $GITHUB_SHA (hotfix #$pr, \`$title\`) onto \`$target\` conflicted. Cherry-pick it by hand onto a \`backport/$pr-to-$target\` branch and open a PR."
+            fi
+          done
