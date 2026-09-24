@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [dev, staging, main]
+    branches: [dev]
   workflow_call:
 
 permissions:
