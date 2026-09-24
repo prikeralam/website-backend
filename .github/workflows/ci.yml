@@ -59,3 +59,27 @@ jobs:
         run: python manage.py makemigrations --check --dry-run
       - run: python manage.py migrate --noinput
       - run: python manage.py test
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: pri-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Container serves /healthz/ against a real database
+        run: |
+          docker network create ci
+          docker run -d --name db --network ci -e POSTGRES_USER=pri -e POSTGRES_PASSWORD=pri -e POSTGRES_DB=pri postgres:16-alpine
+          for i in $(seq 1 30); do docker exec db pg_isready -U pri && break; sleep 2; done
+          docker run -d --name web --network ci -p 8000:8000             -e ENVIRONMENT=staging -e DEBUG=False -e SECRET_KEY=ci-only-secret-key             -e ALLOWED_HOSTS=localhost,127.0.0.1 -e AWS_STORAGE_BUCKET_NAME=ci-bucket             -e DATABASE_URL=postgresql://pri:pri@db:5432/pri pri-backend:ci
+          docker exec web python manage.py migrate --noinput
+          for i in $(seq 1 30); do curl -fsS http://localhost:8000/healthz/ && exit 0; sleep 2; done
+          docker logs web
+          exit 1

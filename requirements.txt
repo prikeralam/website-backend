@@ -8,3 +8,5 @@ django-environ==0.14.0
 django-storages==1.14.6
 boto3==1.43.98
 drf-spectacular==0.30.0
+gunicorn==26.2.0
+whitenoise==6.12.0
