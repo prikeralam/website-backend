@@ -1,0 +1,103 @@
+name: SSH deploy
+description: Upload the compose file, nginx template and env file to an EC2 host and run deploy/remote-deploy.sh there.
+
+inputs:
+  host:
+    description: EC2 hostname or IP
+    required: true
+  user:
+    description: SSH user
+    required: true
+  ssh-key:
+    description: Private key for the deploy user
+    required: true
+  known-hosts:
+    description: Pinned host key line(s), output of ssh-keyscan
+    required: true
+  app-env-file:
+    description: Full runtime env file contents (the workflow appends IMAGE)
+    required: true
+  expected-environment:
+    description: staging or production; the env file must declare the same ENVIRONMENT
+    required: true
+  compose-file:
+    description: Repo path of the compose file to install as docker-compose.yml
+    required: true
+  image:
+    description: Fully qualified image reference to deploy
+    required: true
+  ghcr-user:
+    description: User for the server-side GHCR login
+    required: true
+  ghcr-token:
+    description: Short-lived token with read access to the image
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        HOST: ${{ inputs.host }}
+        SSH_USER: ${{ inputs.user }}
+        SSH_KEY: ${{ inputs.ssh-key }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+        APP_ENV_FILE: ${{ inputs.app-env-file }}
+        EXPECTED_ENV: ${{ inputs.expected-environment }}
+      run: |
+        missing=0
+        for name in HOST SSH_USER SSH_KEY KNOWN_HOSTS APP_ENV_FILE; do
+          if [ -z "${!name}" ]; then
+            echo "::error::Required deploy secret for $name is not set in the $EXPECTED_ENV environment"
+            missing=1
+          fi
+        done
+        [ "$missing" = 0 ]
+        # Never let one environment's deploy run with another environment's config (CONTRIBUTING.md §5).
+        printf '%s\n' "$APP_ENV_FILE" | grep -qx "ENVIRONMENT=$EXPECTED_ENV" \
+          || { echo "::error::APP_ENV_FILE must contain ENVIRONMENT=$EXPECTED_ENV"; exit 1; }
+
+    - name: Configure SSH
+      shell: bash
+      env:
+        HOST: ${{ inputs.host }}
+        SSH_USER: ${{ inputs.user }}
+        SSH_KEY: ${{ inputs.ssh-key }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+      run: |
+        install -m 700 -d ~/.ssh
+        printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+        chmod 600 ~/.ssh/id_deploy
+        printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+        {
+          echo "Host target"
+          echo "  HostName $HOST"
+          echo "  User $SSH_USER"
+          echo "  IdentityFile ~/.ssh/id_deploy"
+          echo "  StrictHostKeyChecking yes"
+          echo "  BatchMode yes"
+        } > ~/.ssh/config
+
+    - name: Upload deploy files
+      shell: bash
+      env:
+        APP_ENV_FILE: ${{ inputs.app-env-file }}
+        IMAGE: ${{ inputs.image }}
+        COMPOSE_FILE: ${{ inputs.compose-file }}
+      run: |
+        { printf '%s\n' "$APP_ENV_FILE"; echo "IMAGE=$IMAGE"; } > "$RUNNER_TEMP/.env.new"
+        scp "$COMPOSE_FILE" target:/opt/pri-backend/docker-compose.yml
+        scp deploy/nginx.conf.template deploy/remote-deploy.sh "$RUNNER_TEMP/.env.new" target:/opt/pri-backend/
+        rm -f "$RUNNER_TEMP/.env.new"
+
+    - name: Log the server in to GHCR
+      shell: bash
+      env:
+        GHCR_USER: ${{ inputs.ghcr-user }}
+        GHCR_TOKEN: ${{ inputs.ghcr-token }}
+      run: printf '%s' "$GHCR_TOKEN" | ssh target "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+
+    - name: Deploy
+      shell: bash
+      run: ssh target "bash /opt/pri-backend/remote-deploy.sh"

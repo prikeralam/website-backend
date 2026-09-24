@@ -55,53 +55,17 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment: staging
-    env:
-      IMAGE: ${{ needs.build.outputs.image }}
-      EC2_HOST: ${{ secrets.EC2_HOST }}
-      EC2_USER: ${{ secrets.EC2_USER }}
-      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-      EC2_SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
-      APP_ENV_FILE: ${{ secrets.APP_ENV_FILE }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check required secrets
-        run: |
-          missing=0
-          for name in EC2_HOST EC2_USER EC2_SSH_KEY EC2_SSH_KNOWN_HOSTS APP_ENV_FILE; do
-            if [ -z "${!name}" ]; then echo "::error::Secret $name is not set in the staging environment"; missing=1; fi
-          done
-          [ "$missing" = 0 ]
-          # The env file must describe staging, never another environment (CONTRIBUTING.md §5).
-          printf '%s\n' "$APP_ENV_FILE" | grep -qx 'ENVIRONMENT=staging' \
-            || { echo "::error::APP_ENV_FILE must contain ENVIRONMENT=staging"; exit 1; }
-
-      - name: Configure SSH
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "$EC2_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          {
-            echo "Host target"
-            echo "  HostName $EC2_HOST"
-            echo "  User $EC2_USER"
-            echo "  IdentityFile ~/.ssh/id_deploy"
-            echo "  StrictHostKeyChecking yes"
-            echo "  BatchMode yes"
-          } > ~/.ssh/config
-
-      - name: Upload deploy files
-        run: |
-          { printf '%s\n' "$APP_ENV_FILE"; echo "IMAGE=$IMAGE"; } > .env.new
-          scp deploy/docker-compose.staging.yml target:/opt/pri-backend/docker-compose.yml
-          scp deploy/nginx.conf.template deploy/remote-deploy.sh .env.new target:/opt/pri-backend/
-
-      - name: Log the server in to GHCR
-        env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: printf '%s' "$GHCR_TOKEN" | ssh target "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
-
-      - name: Deploy
-        run: ssh target "bash /opt/pri-backend/remote-deploy.sh"
+      - uses: ./.github/actions/ssh-deploy
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          user: ${{ secrets.EC2_USER }}
+          ssh-key: ${{ secrets.EC2_SSH_KEY }}
+          known-hosts: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+          app-env-file: ${{ secrets.APP_ENV_FILE }}
+          expected-environment: staging
+          compose-file: deploy/docker-compose.staging.yml
+          image: ${{ needs.build.outputs.image }}
+          ghcr-user: ${{ github.actor }}
+          ghcr-token: ${{ secrets.GITHUB_TOKEN }}
