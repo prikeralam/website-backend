@@ -194,7 +194,9 @@ class DatasetSubThemeRequirementTests(APITestCase):
         )
         self.client.force_authenticate(self.user)
         self.top_level_theme = Theme.objects.get(slug="demography")
-        self.sub_theme = Theme.objects.create(slug="fertility-rates", name="Fertility Rates", parent=self.top_level_theme)
+        self.sub_theme = Theme.objects.create(
+            slug="fertility-rates", name="Fertility Rates", parent=self.top_level_theme
+        )
 
     def _payload(self, sub_theme_id):
         return {
