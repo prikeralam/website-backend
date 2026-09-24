@@ -10,7 +10,6 @@ and docs/PRDs/C-data-repository-dashboard-integration.md:36-39.
 """
 from apps.workflow.permissions import STAFF_ROLES
 
-
 INTERNAL_USE_ROLES = STAFF_ROLES | {"researcher"}
 
 

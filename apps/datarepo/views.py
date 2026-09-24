@@ -21,7 +21,6 @@ from .models import AccessRequest, Dashboard, Dataset
 from .permissions import can_download, visible_datasets_for
 from .serializers import AccessRequestReviewSerializer, AccessRequestSerializer, DashboardSerializer, DatasetSerializer
 
-
 MODULE_TAG = "Module C — Data Repository"
 
 
