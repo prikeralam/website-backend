@@ -1,6 +1,3 @@
-import csv
-import io
-
 import django_filters
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -19,6 +16,7 @@ from apps.workflow.views import WorkflowViewSetMixin
 
 from .models import AccessRequest, Dashboard, Dataset
 from .permissions import can_download, visible_datasets_for
+from .previews import PreviewError, UnsupportedFormat, table_page
 from .serializers import AccessRequestReviewSerializer, AccessRequestSerializer, DashboardSerializer, DatasetSerializer
 
 MODULE_TAG = "Module C — Data Repository"
@@ -71,29 +69,20 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
     @action(detail=True, methods=["get"], url_path="preview/table")
     def preview_table(self, request, slug=None):
         dataset = self.get_object()
-        if dataset.format != "csv":
-            return Response(
-                {"detail": f"Table preview isn't implemented yet for format '{dataset.format}'."},
-                status=status.HTTP_501_NOT_IMPLEMENTED,
-            )
         try:
             page = max(1, int(request.query_params.get("page", 1)))
         except ValueError:
             page = 1
         page_size = 50
-        start = (page - 1) * page_size
-
-        with dataset.file.open("rb") as raw:
-            text = io.TextIOWrapper(raw, encoding="utf-8")
-            reader = csv.reader(text)
-            header = next(reader, [])
-            rows = []
-            for i, row in enumerate(reader):
-                if i < start:
-                    continue
-                if len(rows) >= page_size:
-                    break
-                rows.append(row)
+        try:
+            header, rows = table_page(dataset, page, page_size)
+        except UnsupportedFormat:
+            return Response(
+                {"detail": f"Table preview isn't available for format '{dataset.format}'."},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
+        except PreviewError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         return Response({"page": page, "page_size": page_size, "header": header, "rows": rows})
 
