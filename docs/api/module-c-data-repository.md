@@ -13,7 +13,7 @@ All endpoints taken from the PRD's own API surface list (`docs/PRDs/C-data-repos
 | `GET /api/v1/datasets/?sub_theme=&theme=&geography=&year=&q=` | Auth, visibility-filtered | `sub_theme` (exact), `theme` (top-level, via `sub_theme__parent_id`), `geography`, `year`, `q` | **Built** — `apps/datarepo/views.py`'s `DatasetFilter` |
 | `GET /api/v1/datasets/{slug}/` | Auth, visibility-filtered | — | **Built, flagged deviation** — see below |
 | `GET /api/v1/datasets/{slug}/preview/table/?page=` | Auth, visibility-filtered | `page` | **Built** — `csv`; `parquet` (via `pyarrow`, 50 rows per page, non-JSON cell types stringified); `zip` (first `.csv` member). An unreadable file, or a zip with no CSV, returns `422` |
-| `GET /api/v1/datasets/{slug}/preview/map/` | Auth, visibility-filtered | — | **Built as a `501` stub** — no spatial format exists in the committed `format` choices (`csv`/`parquet`/`zip`); needs a real decision before this can return real data |
+| `GET /api/v1/datasets/{slug}/preview/map/` | Auth, visibility-filtered | — | **Built** — `geojson` datasets only: the file is parsed and returned as-is for the frontend to render (10 MB cap, `413` above it). A non-`geojson` dataset, or a file that isn't valid GeoJSON, returns `422` |
 | `GET /api/v1/datasets/{slug}/download/` | Auth, visibility+access-gated | — | **Built** |
 | `POST /api/v1/datasets/{slug}/request-access/` | Authenticated | — | **Built** — creates an `AccessRequest` |
 | `POST /api/v1/datasets/{slug}/transition/` | Auth (role-gated) | — | **Built** — shared `WorkflowViewSetMixin` action, same as A/B |

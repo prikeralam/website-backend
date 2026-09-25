@@ -14,6 +14,7 @@ from apps.accounts.models import AuditLog
 from apps.workflow.permissions import STAFF_ROLES, CanSubmitDraft
 from apps.workflow.views import WorkflowViewSetMixin
 
+from .geo import GeoJSONError, GeoJSONTooLarge, load_geojson
 from .models import AccessRequest, Dashboard, Dataset
 from .permissions import can_download, visible_datasets_for
 from .previews import PreviewError, UnsupportedFormat, table_page
@@ -88,20 +89,21 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="preview/map")
     def preview_map(self, request, slug=None):
-        # Flagged, not silently resolved: the committed Dataset.format choices
-        # (csv/parquet/zip) have no spatial format, so there's no source of map-ready
-        # geo data yet. See docs/api/module-c-data-repository.md's preview_map note.
-        return Response(
-            {
-                "detail": (
-                    "Map preview is not implemented: no spatial format exists in the "
-                    "current Dataset schema (formats are csv/parquet/zip). Needs a real "
-                    "decision (e.g. a geojson format or a separate geo-reference field) "
-                    "before this can be built."
-                )
-            },
-            status=status.HTTP_501_NOT_IMPLEMENTED,
-        )
+        dataset = self.get_object()
+        if dataset.format != "geojson":
+            return Response(
+                {"detail": f"Map preview needs a 'geojson' dataset, not '{dataset.format}'."},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        try:
+            return Response(load_geojson(dataset))
+        except GeoJSONTooLarge:
+            return Response(
+                {"detail": "This GeoJSON file is too large to preview on a map."},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        except GeoJSONError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
     @action(detail=True, methods=["get"])
     def download(self, request, slug=None):
