@@ -5,7 +5,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.generics import ListAPIView
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
@@ -43,7 +43,7 @@ class DatasetFilter(django_filters.FilterSet):
 class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = Dataset.objects.all()
     serializer_class = DatasetSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = DatasetFilter
@@ -124,7 +124,7 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
 class DashboardViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = Dashboard.objects.all()
     serializer_class = DashboardSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["theme", "geography", "year", "type"]

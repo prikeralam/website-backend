@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import AccessRequest, Dashboard, Dataset
+from .permissions import can_download
 
 WORKFLOW_READ_ONLY_FIELDS = ["status", "created_by", "reviewed_by", "created_at", "updated_at", "published_at"]
 
@@ -29,6 +30,15 @@ class DatasetSerializer(serializers.ModelSerializer):
             "published_at",
         ]
         read_only_fields = WORKFLOW_READ_ONLY_FIELDS
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # The file URL is the download itself; an on_request dataset's must not leak through
+        # list/detail responses to anyone the /download/ endpoint would refuse.
+        request = self.context.get("request")
+        if request is not None and not can_download(request.user, instance):
+            data.pop("file", None)
+        return data
 
     def validate_sub_theme(self, sub_theme):
         if sub_theme.parent_id is None:

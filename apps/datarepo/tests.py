@@ -37,6 +37,7 @@ class DatasetVisibilityTests(APITestCase):
                 format="csv",
                 sub_theme=sub_theme,
                 visibility=visibility,
+                status="published",
                 created_by=self.admin,
             )
 
@@ -119,6 +120,7 @@ class AccessRequestFlowTests(APITestCase):
             format="csv",
             sub_theme=sub_theme,
             visibility="on_request",
+            status="published",
             created_by=self.editor,
         )
 
