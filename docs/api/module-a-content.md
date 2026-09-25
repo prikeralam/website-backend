@@ -8,16 +8,16 @@ All four resources below share `apps/workflow`'s `WorkflowMixin` (status field) 
 
 | Method & Path | Auth | Filters | Status |
 |---|---|---|---|
-| `GET/POST /api/v1/content-blocks/` | Auth (write: contributor role) | — | **Built** — `apps/content/views.py`, `apps/content/urls.py` |
-| `GET /api/v1/content-blocks/{slug}/` | Auth | — | **To build** — PRD story 13 / `docs/PRDs/A-content-management-system.md:42`. Router currently looks up by `pk`; needs `lookup_field="slug"`. |
+| `GET/POST /api/v1/content-blocks/` | Public read; write: contributor role | — | **Built** — `apps/content/views.py`, `apps/content/urls.py` |
+| `GET /api/v1/content-blocks/{slug}/` | Public read | — | **To build** — PRD story 13 / `docs/PRDs/A-content-management-system.md:42`. Router currently looks up by `pk`; needs `lookup_field="slug"`. |
 | `GET/PATCH/DELETE /api/v1/content-blocks/{pk}/` | Auth (own draft or staff) | — | **Built** |
 | `POST /api/v1/content-blocks/{pk}/transition/` | Auth (role-gated) | — | **Built** — shared `WorkflowViewSetMixin` action |
-| `GET/POST /api/v1/testimonials/` | Auth | — | **Built** |
-| `GET/POST /api/v1/people/` | Auth | — | **Built** |
-| `GET /api/v1/people/?group=` | Auth | `group` | **To build** — PRD story 8 (line 22). Field exists (`PersonProfile.group`); needs `filterset_fields = ["group"]` added to the viewset. |
-| `GET/POST /api/v1/documents/` | Auth | — | **Built** |
-| `GET /api/v1/documents/?type=&year=` | Auth | `document_type`, `year` | **To build** — PRD story 9 (line 23). Fields don't exist in code yet; ERD flags them explicitly not-yet-built (`docs/erd/README.md:77`, `docs/erd/pri_platform_schema.sql:164-165`). |
-| `GET /api/v1/updates/latest/?limit=&types=` | Auth | `limit`, `types` | **To build** — PRD story 10 (lines 24, 46). Cross-type feed of most recently published content. |
+| `GET/POST /api/v1/testimonials/` | Public read; write: contributor role | — | **Built** |
+| `GET/POST /api/v1/people/` | Public read; write: contributor role | — | **Built** |
+| `GET /api/v1/people/?group=` | Public read | `group` | **To build** — PRD story 8 (line 22). Field exists (`PersonProfile.group`); needs `filterset_fields = ["group"]` added to the viewset. |
+| `GET/POST /api/v1/documents/` | Public read; write: contributor role | — | **Built** |
+| `GET /api/v1/documents/?type=&year=` | Public read | `document_type`, `year` | **To build** — PRD story 9 (line 23). Fields don't exist in code yet; ERD flags them explicitly not-yet-built (`docs/erd/README.md:77`, `docs/erd/pri_platform_schema.sql:164-165`). |
+| `GET /api/v1/updates/latest/?limit=&types=` | Public | `limit`, `types` | **To build** — PRD story 10 (lines 24, 46). Cross-type feed of most recently published content. |
 
 Every content-type resource also gets `POST /{pk}/transition/` (built, shared action) — omitted from the table above for brevity, one row per resource type.
 

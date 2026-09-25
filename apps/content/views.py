@@ -1,6 +1,6 @@
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
@@ -25,7 +25,7 @@ MODULE_TAG = "Module A — Content"
 class ContentBlockViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = ContentBlock.objects.all()
     serializer_class = ContentBlockSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
     lookup_field = "slug"
 
 
@@ -33,14 +33,14 @@ class ContentBlockViewSet(WorkflowViewSetMixin, ModelViewSet):
 class TestimonialViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = Testimonial.objects.all()
     serializer_class = TestimonialSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
 
 
 @extend_schema(tags=[MODULE_TAG])
 class PersonProfileViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = PersonProfile.objects.all()
     serializer_class = PersonProfileSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["group"]
 
@@ -49,7 +49,7 @@ class PersonProfileViewSet(WorkflowViewSetMixin, ModelViewSet):
 class DocumentViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = Document.objects.all()
     serializer_class = DocumentSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["document_type", "year"]
 
@@ -65,7 +65,7 @@ _LATEST_UPDATES_TYPES = {
 
 
 class LatestUpdatesView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @extend_schema(
         tags=[MODULE_TAG],

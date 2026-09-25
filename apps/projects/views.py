@@ -1,5 +1,5 @@
 from drf_spectacular.utils import extend_schema
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.viewsets import ModelViewSet
 
 from apps.workflow.permissions import CanSubmitDraft
@@ -13,4 +13,4 @@ from .serializers import ProjectSerializer
 class ProjectViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]

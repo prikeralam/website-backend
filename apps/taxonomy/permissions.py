@@ -4,8 +4,8 @@ from apps.workflow.permissions import STAFF_ROLES
 
 
 class IsStaffOrReadOnly(BasePermission):
-    """Theme is shared reference data used across Modules B/C — read for any authenticated
-    user, write (create/update/delete) restricted to editor/admin, same as who can approve/
+    """Theme is shared reference data used across Modules B/C — read for anyone
+    (including anonymous visitors), write (create/update/delete) restricted to editor/admin, same as who can approve/
     publish workflowed content, rather than opened up to every contributor role."""
 
     def has_permission(self, request, view):

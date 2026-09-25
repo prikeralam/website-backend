@@ -28,7 +28,34 @@ No self-registration endpoint exists anywhere in code today. Module H's PRD (`do
 
 ## Default permission model
 
-`IsAuthenticated` is the DRF-wide default (`config/settings.py:126-128`) — nothing is public/anonymous-read yet, matching the backend CLAUDE.md's explicit statement that this is deliberate until a frontend consumer exists. Every endpoint below is `IsAuthenticated` unless stated otherwise.
+`IsAuthenticated` is still the DRF-wide default (`config/settings.py`), so any endpoint not listed below requires a JWT. The exception is **public read** (issue #15): anonymous visitors may `GET` the endpoints in the table below, and only ever see what the "Who sees what" rule allows. Every write, and every action that acts on behalf of a user, still requires authentication.
+
+### Public-read endpoints (no token needed)
+
+| Endpoint | What anonymous callers get |
+|---|---|
+| `GET /content-blocks/`, `/testimonials/`, `/people/`, `/documents/`, `/projects/` (and `/{slug}/` or `/{id}/`) | published objects only |
+| `GET /updates/latest/` | published items only (already the case) |
+| `GET /publications/` (and `/{slug}/`, `/{slug}/citation/`, `/{slug}/download/`) | published publications with `visibility=public` only |
+| `GET /datasets/` (and `/{slug}/`, `/{slug}/preview/table/`, `/{slug}/preview/map/`) | published datasets, `public` and `on_request` tiers. `internal_only` is a 404. An `on_request` dataset is listed but its `file` URL is omitted |
+| `GET /datasets/{slug}/download/` | `public` tier only; `on_request` returns 403 until the signed-in user has an approved access request |
+| `GET /dashboards/` (and `/{slug}/`) | published dashboards only |
+| `GET /themes/` and `/themes/{id}/subthemes/` | all themes (reference data) |
+| `POST /token/`, `POST /token/refresh/` | login |
+
+Still authenticated: `users/me/role/`, `users/{id}/role/`, `audit-log/`, `access-requests/`, `datasets/{slug}/request-access/`, every `transition/`, every write (`POST`/`PATCH`/`PUT`/`DELETE`). Anonymous callers get `401` on these.
+
+### Who sees what (workflowed objects)
+
+The same rule applies to every list and detail read, for every content type (A, B, C, Projects):
+
+| Caller | Sees |
+|---|---|
+| anonymous, or signed in as `public` / `fellow` | `published` objects only |
+| `researcher` | `published` objects plus their own drafts |
+| `editor`, `admin` | everything |
+
+Publications additionally hide `visibility=private` from everyone except staff and the creator. Datasets additionally hide `internal_only` from everyone except `researcher`/`editor`/`admin`. A hidden object returns `404`, not `403`, so its existence isn't revealed.
 
 ## Permission matrix (Module H, authoritative — see module-h doc)
 

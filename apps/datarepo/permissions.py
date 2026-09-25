@@ -1,8 +1,7 @@
 """Three-tier dataset visibility enforcement — see docs/api/module-c-data-repository.md
 and docs/PRDs/C-data-repository-dashboard-integration.md:36-39.
 
-    public         - visible to any authenticated user (nothing is public/anonymous yet
-                     site-wide, per config/settings.py's IsAuthenticated default).
+    public         - visible to anyone, including anonymous visitors, once published.
     on_request     - listed for everyone, but full download requires an approved
                      AccessRequest for that user (or staff).
     internal_only  - excluded entirely from any non-staff (non researcher/editor/admin)
@@ -34,5 +33,7 @@ def can_download(user, dataset):
         return True
     if dataset.visibility == "public":
         return True
-    # on_request
+    # on_request: an approved request belongs to a signed-in user, so anonymous visitors never qualify
+    if not user.is_authenticated:
+        return False
     return dataset.access_requests.filter(user=user, status="approved").exists()
