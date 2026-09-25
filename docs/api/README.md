@@ -19,6 +19,7 @@ Cross-cutting conventions for the v1 API. Module-specific endpoint tables live i
 - **Workflow status** (`status` on every content type): `draft`, `in_review`, `approved`, `published`, `unpublished`. Anonymous callers only ever receive `published` objects.
 - **CORS:** the API allows the origins in the `CORS_ALLOWED_ORIGINS` env var (default `http://localhost:3000`). The deployed frontend's origin must be added there for each environment.
 - **Files:** `file` fields are URLs into object storage. Whether they are readable without a signature depends on the bucket policy.
+- **Demo data:** on a local backend, `python manage.py seed_demo` loads the PRI prototype's content and one user per role (`demo_public`, `demo_researcher`, `demo_editor`, `demo_fellow`, `demo_admin`, password `demo-pass-123`). Dev only; it refuses to run in staging or production.
 - **Not built yet:** Modules D (Fellowship), E (Media Watch), F (Donors), G (Forms).
 
 Scope of this contract: **Modules A, B, C, H only.** Modules D (Fellowship), E (Media Watch), F (Donors), G (Forms) are each explicitly headed *"Future phase — not yet prioritized for build"* in their own PRDs (`docs/PRDs/D-*.md` … `G-*.md`) and are deliberately not drafted here — revisit when actually prioritized.

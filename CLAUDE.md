@@ -37,6 +37,7 @@ docker compose up -d
 
 # 5. Migrate and run
 python manage.py migrate
+python manage.py seed_demo   # optional: demo users + the PRI prototype's content (dev only)
 python manage.py runserver
 ```
 
@@ -80,6 +81,7 @@ Module C was originally planned to be CKAN-backed (`app/api/datasets/*` in the `
 
 ## Changelog
 
+- **2026-09-25** — Added `python manage.py seed_demo` so a frontend has real data to render. It loads the content of the PRI website prototype (pages, the 7-person team, patrons, executive council, advisory body, partners, three projects, the four data stories, two annual reports and two dashboards, plus datasets built only from figures quoted in those stories) and one demo user per role (`demo_<role>`, password `demo-pass-123`). A few extra draft, private and gated rows exist only to exercise the visibility rules, and where the prototype says "to be supplied" the seed does too. It is idempotent and refuses to run unless `ENVIRONMENT=dev`, since it creates accounts with a known password.
 - **2026-09-25** — Prepared the API contract for the frontend repo: committed a validated OpenAPI 3.0 schema (`docs/api/openapi.yaml`, generated from the code) and added a "Start here: frontend integration" section to `docs/api/README.md` covering the JWT flow, pagination, error shapes, anonymous read, CORS and workflow statuses. Refreshed statements that had gone stale since the contract was first drafted (endpoints marked "To build" that are built, pagination and file storage described as open gaps, `/api/v1/` as a follow-up). Gave the shared `status` enums stable names in the schema so generated clients get one `WorkflowStatusEnum`, and fixed the sub-theme schema warning.
 - **2026-09-25** — Opened the API to anonymous read for the frontend integration (issue #15). Before this, every list endpoint returned every object, drafts included, to any signed-in user, so making reads public meant fixing that first: one shared visibility rule now decides what each caller sees (published only for anonymous, `public` and `fellow`; own drafts too for researchers; everything for editors and admins), and `on_request` dataset file URLs no longer leak through list and detail responses. Writes and workflow transitions still need a token. Existing test fixtures now publish their objects, and `apps/workflow/tests.py` covers the leak boundaries for each role and content type.
 - **2026-09-25** — Map preview now works (issue #10): added `geojson` as a `Dataset.format` choice (migration `0004`) and made `preview/map/` return the parsed GeoJSON, so the frontend can render it without a GIS dependency on the backend. GeoJSON only, by decision: shapefile-in-zip and GeoParquet would need a GIS library and stay out until a dataset needs them. Non-GeoJSON datasets and malformed files return `422`, files over 10 MB return `413`, and the three-tier visibility rules apply unchanged.
