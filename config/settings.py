@@ -183,6 +183,11 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "PRI Backend API",
     "DESCRIPTION": "v1 API for the PRI platform — see docs/api/*.md for the module-by-module contract.",
     "VERSION": "1.0.0",
+    # Stable enum names for generated frontend clients: `status` is declared on several models.
+    "ENUM_NAME_OVERRIDES": {
+        "WorkflowStatusEnum": "apps.workflow.models.WorkflowStatus.choices",
+        "AccessRequestStatusEnum": "apps.datarepo.models.AccessRequest.STATUS_CHOICES",
+    },
     "SERVE_INCLUDE_SCHEMA": False,
     # Explicit order (Swagger UI otherwise sorts tags alphabetically); mirrors docs/api/*.md.
     "TAGS": [
