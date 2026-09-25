@@ -1,6 +1,3 @@
-import csv
-import io
-
 import django_filters
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -8,7 +5,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.generics import ListAPIView
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
@@ -17,10 +14,11 @@ from apps.accounts.models import AuditLog
 from apps.workflow.permissions import STAFF_ROLES, CanSubmitDraft
 from apps.workflow.views import WorkflowViewSetMixin
 
+from .geo import GeoJSONError, GeoJSONTooLarge, load_geojson
 from .models import AccessRequest, Dashboard, Dataset
 from .permissions import can_download, visible_datasets_for
+from .previews import PreviewError, UnsupportedFormat, table_page
 from .serializers import AccessRequestReviewSerializer, AccessRequestSerializer, DashboardSerializer, DatasetSerializer
-
 
 MODULE_TAG = "Module C — Data Repository"
 
@@ -45,7 +43,7 @@ class DatasetFilter(django_filters.FilterSet):
 class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = Dataset.objects.all()
     serializer_class = DatasetSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = DatasetFilter
@@ -72,48 +70,40 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
     @action(detail=True, methods=["get"], url_path="preview/table")
     def preview_table(self, request, slug=None):
         dataset = self.get_object()
-        if dataset.format != "csv":
-            return Response(
-                {"detail": f"Table preview isn't implemented yet for format '{dataset.format}'."},
-                status=status.HTTP_501_NOT_IMPLEMENTED,
-            )
         try:
             page = max(1, int(request.query_params.get("page", 1)))
         except ValueError:
             page = 1
         page_size = 50
-        start = (page - 1) * page_size
-
-        with dataset.file.open("rb") as raw:
-            text = io.TextIOWrapper(raw, encoding="utf-8")
-            reader = csv.reader(text)
-            header = next(reader, [])
-            rows = []
-            for i, row in enumerate(reader):
-                if i < start:
-                    continue
-                if len(rows) >= page_size:
-                    break
-                rows.append(row)
+        try:
+            header, rows = table_page(dataset, page, page_size)
+        except UnsupportedFormat:
+            return Response(
+                {"detail": f"Table preview isn't available for format '{dataset.format}'."},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
+        except PreviewError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         return Response({"page": page, "page_size": page_size, "header": header, "rows": rows})
 
     @action(detail=True, methods=["get"], url_path="preview/map")
     def preview_map(self, request, slug=None):
-        # Flagged, not silently resolved: the committed Dataset.format choices
-        # (csv/parquet/zip) have no spatial format, so there's no source of map-ready
-        # geo data yet. See docs/api/module-c-data-repository.md's preview_map note.
-        return Response(
-            {
-                "detail": (
-                    "Map preview is not implemented: no spatial format exists in the "
-                    "current Dataset schema (formats are csv/parquet/zip). Needs a real "
-                    "decision (e.g. a geojson format or a separate geo-reference field) "
-                    "before this can be built."
-                )
-            },
-            status=status.HTTP_501_NOT_IMPLEMENTED,
-        )
+        dataset = self.get_object()
+        if dataset.format != "geojson":
+            return Response(
+                {"detail": f"Map preview needs a 'geojson' dataset, not '{dataset.format}'."},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        try:
+            return Response(load_geojson(dataset))
+        except GeoJSONTooLarge:
+            return Response(
+                {"detail": "This GeoJSON file is too large to preview on a map."},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        except GeoJSONError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
     @action(detail=True, methods=["get"])
     def download(self, request, slug=None):
@@ -134,7 +124,7 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
 class DashboardViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = Dashboard.objects.all()
     serializer_class = DashboardSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["theme", "geography", "year", "type"]

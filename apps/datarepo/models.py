@@ -9,6 +9,7 @@ class Dataset(WorkflowMixin):
         ("csv", "CSV"),
         ("parquet", "Parquet"),
         ("zip", "ZIP"),
+        ("geojson", "GeoJSON"),
     ]
     VISIBILITY_CHOICES = [
         ("public", "Public"),

@@ -10,14 +10,14 @@ All endpoints taken from the PRD's own API surface list (`docs/PRDs/C-data-repos
 
 | Method & Path | Auth | Filters | Status |
 |---|---|---|---|
-| `GET /api/v1/datasets/?sub_theme=&theme=&geography=&year=&q=` | Auth, visibility-filtered | `sub_theme` (exact), `theme` (top-level, via `sub_theme__parent_id`), `geography`, `year`, `q` | **Built** — `apps/datarepo/views.py`'s `DatasetFilter` |
-| `GET /api/v1/datasets/{slug}/` | Auth, visibility-filtered | — | **Built, flagged deviation** — see below |
-| `GET /api/v1/datasets/{slug}/preview/table/?page=` | Auth, visibility-filtered | `page` | **Built** — CSV only; `parquet`/`zip` return `501` (no parser dependency approved yet) |
-| `GET /api/v1/datasets/{slug}/preview/map/` | Auth, visibility-filtered | — | **Built as a `501` stub** — no spatial format exists in the committed `format` choices (`csv`/`parquet`/`zip`); needs a real decision before this can return real data |
-| `GET /api/v1/datasets/{slug}/download/` | Auth, visibility+access-gated | — | **Built** |
+| `GET /api/v1/datasets/?sub_theme=&theme=&geography=&year=&q=` | Public read, visibility-filtered | `sub_theme` (exact), `theme` (top-level, via `sub_theme__parent_id`), `geography`, `year`, `q` | **Built** — `apps/datarepo/views.py`'s `DatasetFilter` |
+| `GET /api/v1/datasets/{slug}/` | Public read, visibility-filtered | — | **Built, flagged deviation** — see below |
+| `GET /api/v1/datasets/{slug}/preview/table/?page=` | Public read, visibility-filtered | `page` | **Built** — `csv`; `parquet` (via `pyarrow`, 50 rows per page, non-JSON cell types stringified); `zip` (first `.csv` member). An unreadable file, or a zip with no CSV, returns `422` |
+| `GET /api/v1/datasets/{slug}/preview/map/` | Public read, visibility-filtered | — | **Built** — `geojson` datasets only: the file is parsed and returned as-is for the frontend to render (10 MB cap, `413` above it). A non-`geojson` dataset, or a file that isn't valid GeoJSON, returns `422` |
+| `GET /api/v1/datasets/{slug}/download/` | Public for the `public` tier; signed-in with an approved request for `on_request` | — | **Built** |
 | `POST /api/v1/datasets/{slug}/request-access/` | Authenticated | — | **Built** — creates an `AccessRequest` |
 | `POST /api/v1/datasets/{slug}/transition/` | Auth (role-gated) | — | **Built** — shared `WorkflowViewSetMixin` action, same as A/B |
-| `GET /api/v1/dashboards/?theme=&geography=&year=&type=` | Auth, visibility-filtered | `theme`, `geography`, `year`, `type` | **Built** — `theme` here is a direct FK (Dashboard wasn't asked to require a sub-theme, unlike Dataset) |
+| `GET /api/v1/dashboards/?theme=&geography=&year=&type=` | Public read, published only | `theme`, `geography`, `year`, `type` | **Built** — `theme` here is a direct FK (Dashboard wasn't asked to require a sub-theme, unlike Dataset) |
 | `GET /api/v1/access-requests/?status=&dataset=` | Editor/Admin only | `status`, `dataset` | **Built, addition beyond this doc** — needed so staff can discover which `{id}`s are pending before the `PATCH` below is usable |
 | `PATCH /api/v1/access-requests/{id}/` | Editor/Admin only | — | **Built** — proposed shape below, now implemented |
 
@@ -47,7 +47,7 @@ Per PRD Implementation Decisions (`docs/PRDs/C-data-repository-dashboard-integra
 
 Carried verbatim from PRD lines 36-39 — this is the module's core correctness guarantee:
 
-- **`public`** — appears in search, preview and download open to anyone (subject to the site-wide "nothing public yet" default in [README.md](README.md#default-permission-model); revisit when a public/anonymous tier is actually turned on).
+- **`public`** — appears in search, preview and download open to anyone, including anonymous visitors, once the dataset is published (see [README.md](README.md#default-permission-model)).
 - **`on_request`** — appears in search with metadata and a "request access" action; preview may show a reduced/sample level (decide at build time); full download blocked until that user's `AccessRequest` is `approved`.
 - **`internal_only`** — **PRD's own flagged-for-stakeholder-confirmation assumption**, carried through unchanged: fully excluded from search/listing/detail for any non-staff (non Editor/Researcher/Admin) request — not just download-gated, genuinely invisible. Confirm with PRI before implementing, per the PRD's explicit note (line 118). **Implementation note:** since PRD line 39 frames `internal_only` as existing "for Admin/Editor/Researcher-authenticated internal use," download is gated to that same three-role group, not narrowed to Editor/Admin only — a Researcher who can see an `internal_only` dataset can also download it.
 

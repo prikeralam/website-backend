@@ -7,6 +7,20 @@ Cross-cutting conventions for the v1 API. Module-specific endpoint tables live i
 - [module-b-publications.md](module-b-publications.md) — Publication repository
 - [module-c-data-repository.md](module-c-data-repository.md) — Datasets & dashboards
 
+## Start here: frontend integration
+
+- **Machine-readable contract:** [`openapi.yaml`](openapi.yaml) (OpenAPI 3.0, generated from the code, so it is the source of truth for request/response shapes). It is a snapshot; regenerate it after any endpoint change with `python manage.py spectacular --file docs/api/openapi.yaml --validate`. A running server also serves it at `/api/schema/`, with Swagger UI at `/api/docs/` and ReDoc at `/api/redoc/`. The module docs below explain intent, permissions and open decisions.
+- **Base path:** `/api/v1/`. Send and receive JSON.
+- **Auth:** `POST /api/v1/token/` with `{"username", "password"}` returns `{"access", "refresh"}`. Send `Authorization: Bearer <access>`. `POST /api/v1/token/refresh/` with `{"refresh"}` returns a new access token. Token lifetimes are SimpleJWT's defaults (access 5 minutes, refresh 1 day). There is no self-registration endpoint yet.
+- **Anonymous read:** most `GET` endpoints work without a token and return published content only; see "Public-read endpoints" below.
+- **Current user and role:** `GET /api/v1/users/me/role/` returns the signed-in user's `id`, `email` and `role` (`public`, `researcher`, `editor`, `fellow`, `admin`), for conditional rendering.
+- **Lists:** paginated, `{"count", "next", "previous", "results"}`, 20 per page, `?page=N`. `?q=` searches publications and datasets. Filters per endpoint are in the module docs.
+- **Errors:** `{"detail": "..."}` for auth, permission, not-found and most 4xx; validation errors are `{"field": ["message"]}`. `401` = no or bad token, `403` = signed in but not allowed, `404` also covers objects the caller is not allowed to see. `422` is used by the dataset preview endpoints for unreadable files.
+- **Workflow status** (`status` on every content type): `draft`, `in_review`, `approved`, `published`, `unpublished`. Anonymous callers only ever receive `published` objects.
+- **CORS:** the API allows the origins in the `CORS_ALLOWED_ORIGINS` env var (default `http://localhost:3000`). The deployed frontend's origin must be added there for each environment.
+- **Files:** `file` fields are URLs into object storage. Whether they are readable without a signature depends on the bucket policy.
+- **Not built yet:** Modules D (Fellowship), E (Media Watch), F (Donors), G (Forms).
+
 Scope of this contract: **Modules A, B, C, H only.** Modules D (Fellowship), E (Media Watch), F (Donors), G (Forms) are each explicitly headed *"Future phase — not yet prioritized for build"* in their own PRDs (`docs/PRDs/D-*.md` … `G-*.md`) and are deliberately not drafted here — revisit when actually prioritized.
 
 Every endpoint in these docs is cited to one of:
@@ -16,7 +30,7 @@ Every endpoint in these docs is cited to one of:
 
 ## Versioning & base path
 
-**Decision:** introduce `/api/v1/` as the base path for every endpoint below. `config/urls.py:11-19` is currently flat `/api/` with no versioning class configured in `REST_FRAMEWORK` (`config/settings.py:122-132`). Since the backend CLAUDE.md states "Nothing consumes this API yet," there is no compatibility cost to doing this now, before any frontend integration exists. Implementing this (updating `config/urls.py`'s `path("api/", ...)` prefixes to `path("api/v1/", ...)`) is follow-up work, not part of this doc pass.
+Every endpoint is mounted under `/api/v1/` (`config/urls.py`).
 
 ## Authentication
 
@@ -28,7 +42,34 @@ No self-registration endpoint exists anywhere in code today. Module H's PRD (`do
 
 ## Default permission model
 
-`IsAuthenticated` is the DRF-wide default (`config/settings.py:126-128`) — nothing is public/anonymous-read yet, matching the backend CLAUDE.md's explicit statement that this is deliberate until a frontend consumer exists. Every endpoint below is `IsAuthenticated` unless stated otherwise.
+`IsAuthenticated` is still the DRF-wide default (`config/settings.py`), so any endpoint not listed below requires a JWT. The exception is **public read** (issue #15): anonymous visitors may `GET` the endpoints in the table below, and only ever see what the "Who sees what" rule allows. Every write, and every action that acts on behalf of a user, still requires authentication.
+
+### Public-read endpoints (no token needed)
+
+| Endpoint | What anonymous callers get |
+|---|---|
+| `GET /content-blocks/`, `/testimonials/`, `/people/`, `/documents/`, `/projects/` (and `/{slug}/` or `/{id}/`) | published objects only |
+| `GET /updates/latest/` | published items only (already the case) |
+| `GET /publications/` (and `/{slug}/`, `/{slug}/citation/`, `/{slug}/download/`) | published publications with `visibility=public` only |
+| `GET /datasets/` (and `/{slug}/`, `/{slug}/preview/table/`, `/{slug}/preview/map/`) | published datasets, `public` and `on_request` tiers. `internal_only` is a 404. An `on_request` dataset is listed but its `file` URL is omitted |
+| `GET /datasets/{slug}/download/` | `public` tier only; `on_request` returns 403 until the signed-in user has an approved access request |
+| `GET /dashboards/` (and `/{slug}/`) | published dashboards only |
+| `GET /themes/` and `/themes/{id}/subthemes/` | all themes (reference data) |
+| `POST /token/`, `POST /token/refresh/` | login |
+
+Still authenticated: `users/me/role/`, `users/{id}/role/`, `audit-log/`, `access-requests/`, `datasets/{slug}/request-access/`, every `transition/`, every write (`POST`/`PATCH`/`PUT`/`DELETE`). Anonymous callers get `401` on these.
+
+### Who sees what (workflowed objects)
+
+The same rule applies to every list and detail read, for every content type (A, B, C, Projects):
+
+| Caller | Sees |
+|---|---|
+| anonymous, or signed in as `public` / `fellow` | `published` objects only |
+| `researcher` | `published` objects plus their own drafts |
+| `editor`, `admin` | everything |
+
+Publications additionally hide `visibility=private` from everyone except staff and the creator. Datasets additionally hide `internal_only` from everyone except `researcher`/`editor`/`admin`. A hidden object returns `404`, not `403`, so its existence isn't revealed.
 
 ## Permission matrix (Module H, authoritative — see module-h doc)
 
@@ -50,19 +91,17 @@ Sourced directly from `apps/workflow/permissions.py` (`CONTRIBUTOR_ROLES = {rese
 
 ## Pagination
 
-**Open gap, flagged not fixed:** no `DEFAULT_PAGINATION_CLASS` is set (`config/settings.py`), so every list endpoint (built and proposed) is currently unpaginated. Recommend `rest_framework.pagination.PageNumberPagination` with the standard DRF shape:
+Every list endpoint is paginated (`PageNumberPagination`, 20 per page, `?page=N`) with the standard DRF shape. The one exception is `GET /updates/latest/`, which returns a plain array capped by `?limit=` (default 20, max 100).
 
 ```json
 {"count": 0, "next": null, "previous": null, "results": []}
 ```
 
-Not applied to code in this pass — implementation follow-up.
-
 ## File storage
 
-**Decision: S3-compatible object storage**, replacing local disk. Both Module C's PRD (`docs/PRDs/C-data-repository-dashboard-integration.md:41`) and Module E's PRD (`docs/PRDs/E-media-watch-rapid-response-module.md:33`) already assume "stored in S3/DigitalOcean Spaces (per project CLAUDE.md)," even though no CLAUDE.md or `config/settings.py` states this today — `config/settings.py:111-115` only configures local `MEDIA_ROOT`/`MEDIA_URL` (implicit `FileSystemStorage`), and `requirements.txt` has no `django-storages`/`boto3`.
+**Decision: S3-compatible object storage**, implemented in `config/settings.py`: it is used whenever `AWS_STORAGE_BUCKET_NAME` is set and local disk otherwise. Both Module C's PRD (`docs/PRDs/C-data-repository-dashboard-integration.md:41`) and Module E's PRD (`docs/PRDs/E-media-watch-rapid-response-module.md:33`) already assume "stored in S3/DigitalOcean Spaces (per project CLAUDE.md)," even though no CLAUDE.md or `config/settings.py` states this today — `config/settings.py:111-115` only configures local `MEDIA_ROOT`/`MEDIA_URL` (implicit `FileSystemStorage`), and `requirements.txt` has no `django-storages`/`boto3`.
 
-Target shape (documentation only — not applied to code in this pass):
+Original target shape (now implemented, see `config/settings.py` for the real settings):
 
 - Package: `django-storages[s3]` (uses `boto3` under the hood).
 - Provider-agnostic via `AWS_S3_ENDPOINT_URL` so the same backend works for AWS S3 or DigitalOcean Spaces (PRD names both).
@@ -87,11 +126,11 @@ Built (`apps/taxonomy/`), beyond this contract's original scope: full CRUD, not 
 
 | Method & Path | Auth | Filters | Notes |
 |---|---|---|---|
-| `GET /api/v1/themes/` | Auth | `parent` (id), `top_level` (bool) | Read: any authenticated user. |
+| `GET /api/v1/themes/` | Public | `parent` (id), `top_level` (bool) | Read: anyone, including anonymous visitors. |
 | `POST /api/v1/themes/` | Editor/Admin | — | Write: staff-only (`apps/taxonomy/permissions.py`'s `IsStaffOrReadOnly`) — taxonomy is shared reference data other modules FK to, not contributor-owned content. |
-| `GET/PUT/PATCH/DELETE /api/v1/themes/{id}/` | Auth (read) / Editor/Admin (write) | — | — |
-| `GET/POST /api/v1/themes/{theme_id}/subthemes/` | Auth (read) / Editor/Admin (write) | — | Nested CRUD scoped to one top-level theme's own sub-themes (`apps/taxonomy/views.py`'s `SubThemeViewSet`) — `parent` comes from the URL, not the request body, and is rejected/ignored if sent. `theme_id` must itself be a top-level theme (404 otherwise — can't nest a subtheme under a subtheme). |
-| `GET/PUT/PATCH/DELETE /api/v1/themes/{theme_id}/subthemes/{id}/` | Auth (read) / Editor/Admin (write) | — | — |
+| `GET/PUT/PATCH/DELETE /api/v1/themes/{id}/` | Public (read) / Editor/Admin (write) | — | — |
+| `GET/POST /api/v1/themes/{theme_id}/subthemes/` | Public (read) / Editor/Admin (write) | — | Nested CRUD scoped to one top-level theme's own sub-themes (`apps/taxonomy/views.py`'s `SubThemeViewSet`) — `parent` comes from the URL, not the request body, and is rejected/ignored if sent. `theme_id` must itself be a top-level theme (404 otherwise — can't nest a subtheme under a subtheme). |
+| `GET/PUT/PATCH/DELETE /api/v1/themes/{theme_id}/subthemes/{id}/` | Public (read) / Editor/Admin (write) | — | — |
 
 **Sub-themes:** `Theme.parent` is a nullable self-FK (`related_name="subthemes"`), capped at 2 levels — a sub-theme's own `parent` must itself be top-level (`Theme.clean()` / `ThemeSerializer.validate_parent`); a theme can't be its own parent. `(parent, name)` is unique together, so the same sub-theme name can recur under different top-level themes. The read serializer nests one level of `subthemes` (shallow — a subtheme's response doesn't itself list further children, since none can exist). A theme's sub-themes can be managed either via the flat `/themes/` endpoint (`parent` in the request body) or the nested `/themes/{theme_id}/subthemes/` endpoint (`parent` forced from the URL) — both operate on the same underlying `Theme` rows.
 

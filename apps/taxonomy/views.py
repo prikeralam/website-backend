@@ -1,7 +1,6 @@
 import django_filters
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.viewsets import ModelViewSet
 
 from .models import Theme
@@ -24,7 +23,7 @@ class ThemeFilter(django_filters.FilterSet):
 class ThemeViewSet(ModelViewSet):
     queryset = Theme.objects.all()
     serializer_class = ThemeSerializer
-    permission_classes = [IsAuthenticated, IsStaffOrReadOnly]
+    permission_classes = [IsStaffOrReadOnly]
     filterset_class = ThemeFilter
 
 
@@ -35,7 +34,7 @@ class SubThemeViewSet(ModelViewSet):
     filter ThemeViewSet already supports."""
 
     serializer_class = SubThemeSerializer
-    permission_classes = [IsAuthenticated, IsStaffOrReadOnly]
+    permission_classes = [IsStaffOrReadOnly]
 
     def get_parent_theme(self):
         # parent__isnull=True: theme_pk must itself be a top-level theme — creating a
@@ -43,6 +42,8 @@ class SubThemeViewSet(ModelViewSet):
         return get_object_or_404(Theme, pk=self.kwargs["theme_pk"], parent__isnull=True)
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):  # schema generation has no URL kwargs
+            return Theme.objects.none()
         return Theme.objects.filter(parent_id=self.kwargs["theme_pk"])
 
     def perform_create(self, serializer):

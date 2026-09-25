@@ -5,6 +5,7 @@ Django settings for the PRI backend project.
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -13,9 +14,22 @@ env = environ.Env(
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
-SECRET_KEY = env("SECRET_KEY", default="django-insecure-dev-key-change-me")
+# dev | staging | production. Anything other than "dev" turns on the deployed-environment guards below.
+ENVIRONMENT = env("ENVIRONMENT", default="dev")
+if ENVIRONMENT not in ("dev", "staging", "production"):
+    raise ImproperlyConfigured(f"ENVIRONMENT must be dev, staging or production, got {ENVIRONMENT!r}")
+DEPLOYED = ENVIRONMENT != "dev"
 
 DEBUG = env.bool("DEBUG", default=True)
+if DEPLOYED and DEBUG:
+    raise ImproperlyConfigured(f"DEBUG must be False when ENVIRONMENT={ENVIRONMENT}")
+
+if DEBUG:
+    SECRET_KEY = env("SECRET_KEY", default="django-insecure-dev-key-change-me")
+else:
+    SECRET_KEY = env("SECRET_KEY", default="")
+    if not SECRET_KEY:
+        raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG is False")
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
@@ -53,6 +67,10 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# runserver serves static files itself under DEBUG; WhiteNoise takes over for gunicorn deployments.
+if not DEBUG:
+    MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
 
 ROOT_URLCONF = "config.urls"
 
@@ -120,17 +138,21 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # S3-compatible object storage (AWS S3 or DigitalOcean Spaces) — used when configured,
 # falls back to local disk (Django's default FileSystemStorage) otherwise so local dev
-# keeps working without real bucket credentials.
+# keeps working without real bucket credentials. Static files are served by WhiteNoise.
 AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="")
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
 if AWS_STORAGE_BUCKET_NAME:
     AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="")
     AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default="")
     AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default=None)
     AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default=None)
-    STORAGES = {
-        "default": {"BACKEND": "storages.backends.s3.S3Storage"},
-        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
-    }
+    STORAGES["default"] = {"BACKEND": "storages.backends.s3.S3Storage"}
+elif DEPLOYED:
+    # Uploads on an instance's local disk are lost on redeploy and never shared between environments.
+    raise ImproperlyConfigured(f"AWS_STORAGE_BUCKET_NAME is required when ENVIRONMENT={ENVIRONMENT}")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -161,6 +183,11 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "PRI Backend API",
     "DESCRIPTION": "v1 API for the PRI platform — see docs/api/*.md for the module-by-module contract.",
     "VERSION": "1.0.0",
+    # Stable enum names for generated frontend clients: `status` is declared on several models.
+    "ENUM_NAME_OVERRIDES": {
+        "WorkflowStatusEnum": "apps.workflow.models.WorkflowStatus.choices",
+        "AccessRequestStatusEnum": "apps.datarepo.models.AccessRequest.STATUS_CHOICES",
+    },
     "SERVE_INCLUDE_SCHEMA": False,
     # Explicit order (Swagger UI otherwise sorts tags alphabetically); mirrors docs/api/*.md.
     "TAGS": [
@@ -179,3 +206,15 @@ SPECTACULAR_SETTINGS = {
 CORS_ALLOWED_ORIGINS = env.list(
     "CORS_ALLOWED_ORIGINS", default=["http://localhost:3000"]
 )
+
+
+# HTTPS hardening — on for staging/production, off for local dev. Behind nginx, which sets
+# X-Forwarded-Proto; /healthz/ stays reachable over plain HTTP for container health checks.
+
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=DEPLOYED)
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=DEPLOYED)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=DEPLOYED)
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=31536000 if DEPLOYED else 0)

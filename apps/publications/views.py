@@ -1,11 +1,12 @@
 import django_filters
+from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
@@ -34,7 +35,7 @@ class PublicationFilter(django_filters.FilterSet):
 class PublicationViewSet(WorkflowViewSetMixin, ModelViewSet):
     queryset = Publication.objects.all()
     serializer_class = PublicationSerializer
-    permission_classes = [IsAuthenticated, CanSubmitDraft]
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = PublicationFilter
@@ -43,9 +44,11 @@ class PublicationViewSet(WorkflowViewSetMixin, ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
-        if not user.is_authenticated or getattr(user, "role", None) not in STAFF_ROLES:
-            queryset = queryset.exclude(visibility="private") | queryset.filter(created_by=user)
-            queryset = queryset.distinct()
+        if getattr(user, "role", None) not in STAFF_ROLES:
+            visible = ~Q(visibility="private")
+            if user.is_authenticated:
+                visible |= Q(created_by=user)
+            queryset = queryset.filter(visible)
         return queryset
 
     def filter_queryset(self, queryset):

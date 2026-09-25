@@ -10,12 +10,15 @@ from drf_spectacular.utils import extend_schema
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from .health import healthz
+
 # SimpleJWT's views aren't ours to edit, so tag them for Swagger grouping by wrapping here.
 _AUTH_TAG = extend_schema(tags=["Module H — Users & Roles"])
 TokenObtainPairView = _AUTH_TAG(TokenObtainPairView)
 TokenRefreshView = _AUTH_TAG(TokenRefreshView)
 
 urlpatterns = [
+    path("healthz/", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path("api/v1/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/v1/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

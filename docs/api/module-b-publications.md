@@ -8,12 +8,12 @@ Reuses `apps/workflow`'s shared `WorkflowMixin`/`/transition/` action, same as M
 
 | Method & Path | Auth | Filters | Status |
 |---|---|---|---|
-| `GET /api/v1/publications/?format=&sub_theme=&theme=&language=&status=&q=` | Auth | `format`, `sub_theme` (exact), `theme` (top-level, via `sub_theme__parent_id`), `language`, `status`, `q` (title/abstract search) | **Built** — `apps/publications/views.py`'s `PublicationFilter` |
-| `GET/POST /api/v1/publications/` | Auth (write: contributor) | — | **Built** |
+| `GET /api/v1/publications/?format=&sub_theme=&theme=&language=&status=&q=` | Public read (published, `public` visibility) | `format`, `sub_theme` (exact), `theme` (top-level, via `sub_theme__parent_id`), `language`, `status`, `q` (title/abstract search) | **Built** — `apps/publications/views.py`'s `PublicationFilter` |
+| `GET/POST /api/v1/publications/` | Public read; write: contributor | — | **Built** |
 | `GET/PATCH/DELETE /api/v1/publications/{slug}/` | Auth (own draft or staff) | — | **Built** — `lookup_field = "slug"` |
 | `POST /api/v1/publications/{slug}/transition/` | Auth (role-gated) | — | **Built** — shared action |
 | `POST /api/v1/publications/{slug}/versions/` | Contributor role | — | **Built** — creates a `PublicationVersion`, unsets `is_current` on the prior one |
-| `GET /api/v1/publications/{slug}/download/?version=` | Auth, visibility-gated | `version` (defaults to current) | **Built** |
+| `GET /api/v1/publications/{slug}/download/?version=` | Public, visibility-gated | `version` (defaults to current) | **Built** |
 | `GET /api/v1/publications/{slug}/citation/?format=bibtex\|ris\|apa` | Auth | `format` | **Built** — `apps/publications/citations.py`, generated server-side on request, not stored |
 
 ## Data model (built)
