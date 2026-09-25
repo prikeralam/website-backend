@@ -42,6 +42,8 @@ class SubThemeViewSet(ModelViewSet):
         return get_object_or_404(Theme, pk=self.kwargs["theme_pk"], parent__isnull=True)
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):  # schema generation has no URL kwargs
+            return Theme.objects.none()
         return Theme.objects.filter(parent_id=self.kwargs["theme_pk"])
 
     def perform_create(self, serializer):
