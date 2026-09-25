@@ -1,3 +1,8 @@
+import io
+import zipfile
+
+import pyarrow as pa
+import pyarrow.parquet as pq
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 
@@ -157,15 +162,32 @@ class DatasetTablePreviewTests(APITestCase):
             visibility="public",
             created_by=self.user,
         )
-        self.parquet_ds = Dataset.objects.create(
-            slug="parquet-ds",
-            title="Parquet",
-            file=SimpleUploadedFile("data.parquet", b"not-real-parquet"),
-            format="parquet",
-            sub_theme=sub_theme,
+        self.sub_theme = sub_theme
+
+    def _dataset(self, slug, filename, content, fmt):
+        return Dataset.objects.create(
+            slug=slug,
+            title=slug,
+            file=SimpleUploadedFile(filename, content),
+            format=fmt,
+            sub_theme=self.sub_theme,
             visibility="public",
             created_by=self.user,
         )
+
+    @staticmethod
+    def _parquet_bytes(rows):
+        buffer = io.BytesIO()
+        pq.write_table(pa.table({"id": list(range(rows)), "name": [f"n{i}" for i in range(rows)]}), buffer)
+        return buffer.getvalue()
+
+    @staticmethod
+    def _zip_bytes(members):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for name, content in members.items():
+                archive.writestr(name, content)
+        return buffer.getvalue()
 
     def test_csv_preview_returns_rows(self):
         self.client.force_authenticate(self.user)
@@ -174,10 +196,58 @@ class DatasetTablePreviewTests(APITestCase):
         self.assertEqual(response.data["header"], ["col1", "col2"])
         self.assertEqual(response.data["rows"], [["1", "2"], ["3", "4"]])
 
-    def test_parquet_preview_not_implemented(self):
+    def test_parquet_preview_returns_header_and_rows(self):
+        self._dataset("parquet-ds", "data.parquet", self._parquet_bytes(3), "parquet")
         self.client.force_authenticate(self.user)
         response = self.client.get("/api/v1/datasets/parquet-ds/preview/table/")
-        self.assertEqual(response.status_code, 501)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["header"], ["id", "name"])
+        self.assertEqual(response.data["rows"], [[0, "n0"], [1, "n1"], [2, "n2"]])
+
+    def test_parquet_preview_second_page(self):
+        self._dataset("parquet-ds", "data.parquet", self._parquet_bytes(60), "parquet")
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/datasets/parquet-ds/preview/table/?page=2")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row[0] for row in response.data["rows"]], list(range(50, 60)))
+
+    def test_corrupt_parquet_preview_is_unprocessable(self):
+        self._dataset("parquet-ds", "data.parquet", b"not-real-parquet", "parquet")
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/datasets/parquet-ds/preview/table/")
+        self.assertEqual(response.status_code, 422)
+
+    def test_zip_preview_reads_first_csv_member(self):
+        content = self._zip_bytes({"readme.txt": "hi", "a.csv": "x,y\n1,2\n", "b.csv": "z\n9\n"})
+        self._dataset("zip-ds", "data.zip", content, "zip")
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/datasets/zip-ds/preview/table/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["header"], ["x", "y"])
+        self.assertEqual(response.data["rows"], [["1", "2"]])
+
+    def test_zip_without_csv_is_unprocessable(self):
+        self._dataset("zip-ds", "data.zip", self._zip_bytes({"readme.txt": "hi"}), "zip")
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/datasets/zip-ds/preview/table/")
+        self.assertEqual(response.status_code, 422)
+
+    def test_corrupt_zip_is_unprocessable(self):
+        self._dataset("zip-ds", "data.zip", b"not-a-zip", "zip")
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/datasets/zip-ds/preview/table/")
+        self.assertEqual(response.status_code, 422)
+
+    def test_internal_only_parquet_stays_hidden_from_public_role(self):
+        dataset = self._dataset("parquet-ds", "data.parquet", self._parquet_bytes(1), "parquet")
+        dataset.visibility = "internal_only"
+        dataset.save(update_fields=["visibility"])
+        from django.contrib.auth import get_user_model
+
+        visitor = get_user_model().objects.create_user(username="visitor9", password="pw12345", role="public")
+        self.client.force_authenticate(visitor)
+        response = self.client.get("/api/v1/datasets/parquet-ds/preview/table/")
+        self.assertEqual(response.status_code, 404)
 
     def test_map_preview_not_implemented(self):
         self.client.force_authenticate(self.user)
