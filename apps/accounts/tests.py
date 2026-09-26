@@ -6,7 +6,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from apps.content.models import ContentBlock
+from apps.content.models import ContentBlock, Document, PersonProfile
 from apps.datarepo.models import Dataset
 from apps.publications.models import Publication
 
@@ -55,6 +55,13 @@ class SeedDemoTests(TestCase):
         self.assertEqual(len(client.get("/api/v1/people/?group=executive").json()["results"]), 13)
         projects = {item["slug"] for item in client.get("/api/v1/projects/").json()["results"]}
         self.assertEqual(projects, {"sir-project", "education", "demography-migration"})
+
+    def test_uses_the_real_annual_report_and_board_photos(self):
+        seed()
+        self.assertGreater(Document.objects.get(slug="annual-report-2025-26").file.size, 100_000)
+        chairman = PersonProfile.objects.get(name="Sayyid Sadiq Ali Shihab")
+        self.assertTrue(chairman.photo_url.endswith("/people/executive/sayyid-sadiq-ali-shihab.jpg"))
+        self.assertFalse(PersonProfile.objects.filter(group="patron", photo_url="").exists())
 
     def test_every_preview_format_works_on_the_demo_datasets(self):
         seed()

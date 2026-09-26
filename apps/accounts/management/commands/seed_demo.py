@@ -13,6 +13,7 @@ import io
 import json
 import zipfile
 from datetime import date
+from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -36,6 +37,8 @@ SITE = "https://pri-website-pink.vercel.app"
 UNSPLASH = "https://images.unsplash.com/photo-1521737604893-d14cc237f11d"
 PDF_BYTES = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
 TBS = "Biography to be supplied."
+# The real Annual Report 2025–26 supplied by PRI; older reports stay placeholders.
+ANNUAL_REPORT_2025_26 = Path(__file__).parent / "seed_files" / "annual-report-2025-26.pdf"
 
 # The prototype names no sub-themes; these are the minimum needed for its four data stories and dashboards.
 SUB_THEMES = {
@@ -108,21 +111,23 @@ TEAM = [
     ("Muhammed Sinan", "Web Manager", "muhammed-sinan.png"),
     ("Rashiq", "Data Analyst", "rashiq.jpg"),
 ]
-PATRONS = ["PK Kunjalikkutty", "Galfar Mohammed Ali"]
+# (name, photo file under /people/patrons/)
+PATRONS = [("PK Kunjalikkutty", "pk-kunjalikkutty.jpg"), ("Galfar Mohammed Ali", "galfar-mohammed-ali.jpg")]
+# (name, role_title, photo file under /people/executive/, or None where PRI has not supplied one)
 EXECUTIVE = [
-    ("Sayyid Sadiq Ali Shihab", "Chairman"),
-    ("Ahmad Munavvar Puthiya Maliyekkal", "Vice Chairman"),
-    ("Sayyid Rasheed Ali Puthiya Maliyekkal", "Treasurer"),
-    ("Abubakr T", "Vice President"),
-    ("Dr. Mohammed Haris KT", "General Secretary"),
-    ("Muhammed Nazeel NP", "Executive Member"),
-    ("Sayyid Aseel Ali Shihab Thangal", "Executive Member"),
-    ("Sayyid Rajih Ali Shihab Thangal", "Executive Member"),
-    ("Anwar Naha", "Vice Chairman"),
-    ("C.H Abdul Raheem", "Executive Member"),
-    ("P.A Abdulla Ibrahim", "Executive Member"),
-    ("Abdul Muhaimin Kakkiya", "Executive Member"),
-    ("Dr. Muneer Kalliyil", "Executive Member"),
+    ("Sayyid Sadiq Ali Shihab", "Chairman", "sayyid-sadiq-ali-shihab.jpg"),
+    ("Ahmad Munavvar Puthiya Maliyekkal", "Vice Chairman", "ahmad-munavvar-puthiya-maliyekkal.jpg"),
+    ("Sayyid Rasheed Ali Puthiya Maliyekkal", "Treasurer", "sayyid-rasheed-ali-puthiya-maliyekkal.jpg"),
+    ("Abubakr T", "Vice President", None),
+    ("Dr. Mohammed Haris KT", "General Secretary", "haris-kt.jpeg"),
+    ("Muhammed Nazeel NP", "Executive Member", "naseel.jpeg"),
+    ("Sayyid Aseel Ali Shihab Thangal", "Executive Member", "sayyid-aseel-ali-shihab-thangal.jpg"),
+    ("Sayyid Rajih Ali Shihab Thangal", "Executive Member", "sayyid-rajih-ali-shihab-thangal.jpg"),
+    ("Anwar Naha", "Vice Chairman", None),
+    ("C.H Abdul Raheem", "Executive Member", "ch-abdul-raheem.jpeg"),
+    ("P.A Abdulla Ibrahim", "Executive Member", "pa-abdulla-ibrahim.jpg"),
+    ("Abdul Muhaimin Kakkiya", "Executive Member", None),
+    ("Dr. Muneer Kalliyil", "Executive Member", "muneer-kalliyil.jpg"),
 ]
 # (name, description, logo file under /people/partners/)
 PARTNERS = [
@@ -387,10 +392,10 @@ class Command(BaseCommand):
     def seed_people(self):
         for name, title, photo in TEAM:
             self.person(name, title, "team", photo_url=f"{SITE}/people/team/{photo}")
-        for name in PATRONS:
-            self.person(name, "Patron", "patron")
-        for name, title in EXECUTIVE:
-            self.person(name, title, "executive")
+        for name, photo in PATRONS:
+            self.person(name, "Patron", "patron", photo_url=f"{SITE}/people/patrons/{photo}")
+        for name, title, photo in EXECUTIVE:
+            self.person(name, title, "executive", photo_url=f"{SITE}/people/executive/{photo}" if photo else "")
         for number in range(1, 11):
             self.person(f"Advisory Member {number}", "Advisory Body", "advisory")
         for name, description, logo in PARTNERS:
@@ -432,16 +437,16 @@ class Command(BaseCommand):
                 cta_href=f"/projects/{slug}",
             )
 
-        for slug, title, year, status in [
-            ("annual-report-2025-26", "Annual Report 2025–26", 2026, "published"),
-            ("annual-report-2024-25", "Annual Report 2024–25", 2025, "published"),
-            ("internal-memo", "Internal Memo", 2026, "draft"),
+        for slug, title, year, status, pdf in [
+            ("annual-report-2025-26", "Annual Report 2025–26", 2026, "published", ANNUAL_REPORT_2025_26.read_bytes()),
+            ("annual-report-2024-25", "Annual Report 2024–25", 2025, "published", PDF_BYTES),
+            ("internal-memo", "Internal Memo", 2026, "draft", PDF_BYTES),
         ]:
             self.upsert(
                 Document,
                 slug,
                 status,
-                file=(f"{slug}.pdf", PDF_BYTES),
+                file=(f"{slug}.pdf", pdf),
                 title=title,
                 document_type="memo" if status == "draft" else "annual-report",
                 year=year,
