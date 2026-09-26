@@ -5,11 +5,28 @@ from rest_framework.generics import ListAPIView
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.views import TokenBlacklistView, TokenObtainPairView
 
 from .models import AuditLog, User
 from .serializers import AuditLogSerializer, MyRoleSerializer, RoleUpdateSerializer
+from .throttles import LoginRateThrottle
 
 MODULE_TAG = "Module H — Users & Roles"
+
+
+@extend_schema(tags=[MODULE_TAG])
+class LoginView(TokenObtainPairView):
+    """Exchanges a username and password for an access/refresh token pair.
+
+    Throttled per username: the sixth attempt within a minute answers 429.
+    """
+
+    throttle_classes = [LoginRateThrottle]
+
+
+@extend_schema(tags=[MODULE_TAG])
+class LogoutView(TokenBlacklistView):
+    """Signs out: blacklists the refresh token so it can no longer mint access tokens."""
 
 
 class IsAdmin(BasePermission):

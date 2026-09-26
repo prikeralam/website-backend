@@ -69,3 +69,37 @@ class SeedDemoTests(TestCase):
         with self.assertRaises(CommandError):
             seed()
         self.assertFalse(get_user_model().objects.filter(username__startswith="demo_").exists())
+
+
+class TokenAuthTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        get_user_model().objects.create_user(username="alice", email="alice@example.com", password="right-pass-123")
+
+    def login(self, username="alice", password="right-pass-123"):
+        return self.client.post("/api/v1/token/", {"username": username, "password": password}, format="json")
+
+    def test_login_is_throttled_per_username(self):
+        for _ in range(5):
+            self.assertEqual(self.login(password="wrong").status_code, 401)
+        self.assertEqual(self.login().status_code, 429)
+        # Another account is unaffected, although every request comes from the same IP.
+        get_user_model().objects.create_user(username="bob", password="right-pass-123")
+        self.assertEqual(self.login(username="bob").status_code, 200)
+
+    def test_throttle_ignores_username_case_and_padding(self):
+        for _ in range(5):
+            self.login(username=" ALICE ", password="wrong")
+        self.assertEqual(self.login().status_code, 429)
+
+    def post(self, path, refresh):
+        return self.client.post(path, {"refresh": refresh}, format="json").status_code
+
+    def test_logout_revokes_the_refresh_token(self):
+        refresh = self.login().json()["refresh"]
+        self.assertEqual(self.post("/api/v1/token/refresh/", refresh), 200)
+        self.assertEqual(self.post("/api/v1/token/logout/", refresh), 200)
+        self.assertEqual(self.post("/api/v1/token/refresh/", refresh), 401)
+
+    def test_logout_rejects_an_invalid_token(self):
+        self.assertEqual(self.post("/api/v1/token/logout/", "not-a-token"), 401)
