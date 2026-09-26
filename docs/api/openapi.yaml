@@ -2505,8 +2505,9 @@ paths:
     post:
       operationId: v1_token_create
       description: |-
-        Takes a set of user credentials and returns an access and refresh JSON web
-        token pair to prove the authentication of those credentials.
+        Exchanges a username and password for an access/refresh token pair.
+
+        Throttled per username: the sixth attempt within a minute answers 429.
       tags:
       - Module H — Users & Roles
       requestBody:
@@ -2527,6 +2528,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenObtainPair'
+          description: ''
+  /api/v1/token/logout/:
+    post:
+      operationId: v1_token_logout_create
+      description: 'Signs out: blacklists the refresh token so it can no longer mint
+        access tokens.'
+      tags:
+      - Module H — Users & Roles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenBlacklist'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenBlacklist'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenBlacklist'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenBlacklist'
           description: ''
   /api/v1/token/refresh/:
     post:
@@ -4165,6 +4192,14 @@ components:
       - id
       - name
       - slug
+    TokenBlacklist:
+      type: object
+      properties:
+        refresh:
+          type: string
+          writeOnly: true
+      required:
+      - refresh
     TokenObtainPair:
       type: object
       properties:

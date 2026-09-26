@@ -11,11 +11,11 @@ Cross-cutting conventions for the v1 API. Module-specific endpoint tables live i
 
 - **Machine-readable contract:** [`openapi.yaml`](openapi.yaml) (OpenAPI 3.0, generated from the code, so it is the source of truth for request/response shapes). It is a snapshot; regenerate it after any endpoint change with `python manage.py spectacular --file docs/api/openapi.yaml --validate`. A running server also serves it at `/api/schema/`, with Swagger UI at `/api/docs/` and ReDoc at `/api/redoc/`. The module docs below explain intent, permissions and open decisions.
 - **Base path:** `/api/v1/`. Send and receive JSON.
-- **Auth:** `POST /api/v1/token/` with `{"username", "password"}` returns `{"access", "refresh"}`. Send `Authorization: Bearer <access>`. `POST /api/v1/token/refresh/` with `{"refresh"}` returns a new access token. Token lifetimes are SimpleJWT's defaults (access 5 minutes, refresh 1 day). There is no self-registration endpoint yet.
+- **Auth:** `POST /api/v1/token/` with `{"username", "password"}` returns `{"access", "refresh"}`. Send `Authorization: Bearer <access>`. `POST /api/v1/token/refresh/` with `{"refresh"}` returns a new access token. `POST /api/v1/token/logout/` with `{"refresh"}` signs out by blacklisting that refresh token (a later refresh with it answers 401). Logins are throttled per username: the sixth attempt within a minute answers `429` (the limit is per username, not per IP, because the frontend proxies every login). Token lifetimes are SimpleJWT's defaults (access 5 minutes, refresh 1 day). There is no self-registration endpoint yet.
 - **Anonymous read:** most `GET` endpoints work without a token and return published content only; see "Public-read endpoints" below.
 - **Current user and role:** `GET /api/v1/users/me/role/` returns the signed-in user's `id`, `email` and `role` (`public`, `researcher`, `editor`, `fellow`, `admin`), for conditional rendering.
 - **Lists:** paginated, `{"count", "next", "previous", "results"}`, 20 per page, `?page=N`. `?q=` searches publications and datasets. Filters per endpoint are in the module docs.
-- **Errors:** `{"detail": "..."}` for auth, permission, not-found and most 4xx; validation errors are `{"field": ["message"]}`. `401` = no or bad token, `403` = signed in but not allowed, `404` also covers objects the caller is not allowed to see. `422` is used by the dataset preview endpoints for unreadable files.
+- **Errors:** `{"detail": "..."}` for auth, permission, not-found and most 4xx; validation errors are `{"field": ["message"]}`. `401` = no or bad token, `429` = too many sign-in attempts, `403` = signed in but not allowed, `404` also covers objects the caller is not allowed to see. `422` is used by the dataset preview endpoints for unreadable files.
 - **Workflow status** (`status` on every content type): `draft`, `in_review`, `approved`, `published`, `unpublished`. Anonymous callers only ever receive `published` objects.
 - **CORS:** the API allows the origins in the `CORS_ALLOWED_ORIGINS` env var (default `http://localhost:3000`). The deployed frontend's origin must be added there for each environment.
 - **Files:** `file` fields are URLs into object storage. Whether they are readable without a signature depends on the bucket policy.
@@ -36,8 +36,9 @@ Every endpoint is mounted under `/api/v1/` (`config/urls.py`).
 ## Authentication
 
 JWT via SimpleJWT — already built:
-- `POST /api/v1/token/` — obtain access/refresh token pair. Built: `config/urls.py:13`.
-- `POST /api/v1/token/refresh/` — refresh an access token. Built: `config/urls.py:14`.
+- `POST /api/v1/token/` — obtain access/refresh token pair. Throttled to 5 attempts a minute per username (`LoginRateThrottle`, `apps/accounts/throttles.py`; counters live in the database cache so every worker shares them); the sixth answers `429`. Built: `LoginView`, `apps/accounts/views.py`.
+- `POST /api/v1/token/refresh/` — refresh an access token. Rejects blacklisted refresh tokens (`401`). Built: `config/urls.py`.
+- `POST /api/v1/token/logout/` — `{"refresh"}`; blacklists the refresh token (SimpleJWT `token_blacklist`). `200` on success, `401` for an invalid or already-blacklisted token. Built: `LogoutView`, `apps/accounts/views.py`.
 
 No self-registration endpoint exists anywhere in code today. Module H's PRD (`docs/PRDs/H-user-access-roles.md:43`) states only Donor/Visitor-tier accounts are meant to be self-service — Editor/Researcher/Admin accounts are provisioned internally. Self-service donor registration is Module F's (Donor & Fundraising) territory, out of scope for this pass. **Flagged as an open gap**, not silently filled: there is currently no way for *any* new account to be created via the API (only Django admin / `createsuperuser`).
 
@@ -56,7 +57,7 @@ No self-registration endpoint exists anywhere in code today. Module H's PRD (`do
 | `GET /datasets/{slug}/download/` | `public` tier only; `on_request` returns 403 until the signed-in user has an approved access request |
 | `GET /dashboards/` (and `/{slug}/`) | published dashboards only |
 | `GET /themes/` and `/themes/{id}/subthemes/` | all themes (reference data) |
-| `POST /token/`, `POST /token/refresh/` | login |
+| `POST /token/`, `POST /token/refresh/`, `POST /token/logout/` | login, refresh, sign-out |
 
 Still authenticated: `users/me/role/`, `users/{id}/role/`, `audit-log/`, `access-requests/`, `datasets/{slug}/request-access/`, every `transition/`, every write (`POST`/`PATCH`/`PUT`/`DELETE`). Anonymous callers get `401` on these.
 

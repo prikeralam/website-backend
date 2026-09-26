@@ -8,6 +8,7 @@ Per PRD H's own framing (line 28), this module is mostly infrastructure other mo
 
 | Method & Path | Auth | Description | Status |
 |---|---|---|---|
+| `POST /api/v1/token/`, `/token/refresh/`, `/token/logout/` | Anonymous | Sign in (throttled 5/min per username, `429` beyond), renew the access token, sign out (blacklists the refresh token). See [README.md](README.md#authentication). | **Built** — `LoginView`/`LogoutView`, `apps/accounts/views.py` |
 | `GET /api/v1/users/me/role/` | Authenticated | Current user's id/email/role, for frontend conditional rendering. | **Built** — `MyRoleView`, `apps/accounts/views.py:17` |
 | `PATCH /api/v1/users/{id}/role/` | Admin only | Grant/revoke a user's role. Writes an `AuditLog` row (`module="accounts"`, `action="role_change"`). | **Built** — `UserRoleUpdateView`, `apps/accounts/views.py:25` |
 | `GET /api/v1/audit-log/?module=&actor=` | Admin only | Cross-module audit trail, filterable by module and actor. | **Built** — `AuditLogListView`, `apps/accounts/views.py:53` |
