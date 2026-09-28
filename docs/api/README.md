@@ -11,11 +11,12 @@ Cross-cutting conventions for the v1 API. Module-specific endpoint tables live i
 
 - **Machine-readable contract:** [`openapi.yaml`](openapi.yaml) (OpenAPI 3.0, generated from the code, so it is the source of truth for request/response shapes). It is a snapshot; regenerate it after any endpoint change with `python manage.py spectacular --file docs/api/openapi.yaml --validate`. A running server also serves it at `/api/schema/`, with Swagger UI at `/api/docs/` and ReDoc at `/api/redoc/`. The module docs below explain intent, permissions and open decisions.
 - **Base path:** `/api/v1/`. Send and receive JSON.
-- **Auth:** `POST /api/v1/token/` with `{"username", "password"}` returns `{"access", "refresh"}`. Send `Authorization: Bearer <access>`. `POST /api/v1/token/refresh/` with `{"refresh"}` returns a new access token. `POST /api/v1/token/logout/` with `{"refresh"}` signs out by blacklisting that refresh token (a later refresh with it answers 401). Logins are throttled per username: the sixth attempt within a minute answers `429` (the limit is per username, not per IP, because the frontend proxies every login). Token lifetimes are SimpleJWT's defaults (access 5 minutes, refresh 1 day). There is no self-registration endpoint yet.
+- **Auth:** `POST /api/v1/token/` with `{"username", "password"}` returns `{"access", "refresh"}`. Send `Authorization: Bearer <access>`. `POST /api/v1/token/refresh/` with `{"refresh"}` returns a new access token. `POST /api/v1/token/logout/` with `{"refresh"}` signs out by blacklisting that refresh token (a later refresh with it answers 401). Logins are throttled per username: the sixth attempt within a minute answers `429` (the limit is per username, not per IP, because the frontend proxies every login). Token lifetimes are SimpleJWT's defaults (access 5 minutes, refresh 1 day). There is no self-registration: admins create accounts (`POST /api/v1/users/`).
 - **Anonymous read:** most `GET` endpoints work without a token and return published content only; see "Public-read endpoints" below.
-- **Current user and role:** `GET /api/v1/users/me/role/` returns the signed-in user's `id`, `email` and `role` (`public`, `researcher`, `editor`, `fellow`, `admin`), for conditional rendering.
+- **Current user and role:** `GET /api/v1/users/me/role/` returns the signed-in user's `id`, `email` and `role` (`public`, `researcher`, `editor`, `fellow`, `admin`), for conditional rendering. `GET /api/v1/users/me/` returns the full profile; when its `must_change_password` is `true` (an admin set a temporary password), send the user to a change-password screen (`POST /api/v1/users/me/password/`).
+- **Password emails:** invites and password resets link to `{FRONTEND_URL}/reset-password?uid=...&token=...`. The frontend owns that page and submits `POST /api/v1/password-reset/confirm/` with `uid`, `token` and `new_password`. See [module-h-accounts-roles.md](module-h-accounts-roles.md).
 - **Lists:** paginated, `{"count", "next", "previous", "results"}`, 20 per page, `?page=N`. `?q=` searches publications and datasets. Filters per endpoint are in the module docs.
-- **Errors:** `{"detail": "..."}` for auth, permission, not-found and most 4xx; validation errors are `{"field": ["message"]}`. `401` = no or bad token, `429` = too many sign-in attempts, `403` = signed in but not allowed, `404` also covers objects the caller is not allowed to see. `422` is used by the dataset preview endpoints for unreadable files.
+- **Errors:** `{"detail": "..."}` for auth, permission, not-found and most 4xx; validation errors are `{"field": ["message"]}`. `401` = no or bad token, `429` = too many sign-in attempts or reset requests, `403` = signed in but not allowed, `404` also covers objects the caller is not allowed to see. `422` is used by the dataset preview endpoints for unreadable files.
 - **Workflow status** (`status` on every content type): `draft`, `in_review`, `approved`, `published`, `unpublished`. Anonymous callers only ever receive `published` objects.
 - **CORS:** the API allows the origins in the `CORS_ALLOWED_ORIGINS` env var (default `http://localhost:3000`). The deployed frontend's origin must be added there for each environment.
 - **Files:** `file` fields are URLs into object storage. Whether they are readable without a signature depends on the bucket policy.
@@ -40,7 +41,9 @@ JWT via SimpleJWT — already built:
 - `POST /api/v1/token/refresh/` — refresh an access token. Rejects blacklisted refresh tokens (`401`). Built: `config/urls.py`.
 - `POST /api/v1/token/logout/` — `{"refresh"}`; blacklists the refresh token (SimpleJWT `token_blacklist`). `200` on success, `401` for an invalid or already-blacklisted token. Built: `LogoutView`, `apps/accounts/views.py`.
 
-No self-registration endpoint exists anywhere in code today. Module H's PRD (`docs/PRDs/H-user-access-roles.md:43`) states only Donor/Visitor-tier accounts are meant to be self-service — Editor/Researcher/Admin accounts are provisioned internally. Self-service donor registration is Module F's (Donor & Fundraising) territory, out of scope for this pass. **Flagged as an open gap**, not silently filled: there is currently no way for *any* new account to be created via the API (only Django admin / `createsuperuser`).
+Accounts are provisioned by admins (`POST /api/v1/users/`, issue #38), with a temporary password or an emailed invite. No self-registration endpoint exists. Module H's PRD (`docs/PRDs/H-user-access-roles.md:43`) states only Donor/Visitor-tier accounts are meant to be self-service, and self-service donor registration is Module F's (Donor & Fundraising) territory, out of scope for this pass.
+
+Password endpoints, all anonymous: `POST /api/v1/password-reset/` (`{"email"}`, always `204`, throttled to 5 an hour per email) and `POST /api/v1/password-reset/confirm/` (`{"uid", "token", "new_password"}`, `204`, or `400` for a used, expired or tampered link).
 
 ## Default permission model
 
@@ -58,8 +61,9 @@ No self-registration endpoint exists anywhere in code today. Module H's PRD (`do
 | `GET /dashboards/` (and `/{slug}/`) | published dashboards only |
 | `GET /themes/` and `/themes/{id}/subthemes/` | all themes (reference data) |
 | `POST /token/`, `POST /token/refresh/`, `POST /token/logout/` | login, refresh, sign-out |
+| `POST /password-reset/`, `POST /password-reset/confirm/` | request a reset email, set a password from an emailed link |
 
-Still authenticated: `users/me/role/`, `users/{id}/role/`, `audit-log/`, `access-requests/`, `datasets/{slug}/request-access/`, every `transition/`, every write (`POST`/`PATCH`/`PUT`/`DELETE`). Anonymous callers get `401` on these.
+Still authenticated: `users/me/`, `users/me/role/`, `users/me/password/`, every `users/` admin endpoint, `audit-log/`, `access-requests/`, `datasets/{slug}/request-access/`, every `transition/`, every write (`POST`/`PATCH`/`PUT`/`DELETE`). Anonymous callers get `401` on these.
 
 ### Who sees what (workflowed objects)
 
@@ -87,6 +91,8 @@ Sourced directly from `apps/workflow/permissions.py` (`CONTRIBUTOR_ROLES = {rese
 | Transition in_review → approved → published → unpublished | ❌ | ❌ | ✅ | ❌ | ✅ |
 | Delete | ❌ | ❌ | ✅ | ❌ | ✅ |
 | Grant/revoke roles | ❌ | ❌ | ❌ | ❌ | ✅ |
+| List, create, edit, deactivate users; send password resets | ❌ | ❌ | ❌ | ❌ | ✅ |
+| View and edit own profile, change own password | ✅ | ✅ | ✅ | ✅ | ✅ |
 | View audit log | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 `fellow` has no permissions against A/B/C content today — per Module D's PRD, Fellow/Intern access is scoped to their *own* application status (Module D, out of scope here), not CMS/publication/dataset content.

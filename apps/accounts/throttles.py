@@ -9,9 +9,17 @@ class LoginRateThrottle(SimpleRateThrottle):
     """
 
     scope = "login"
+    field = "username"
 
     def get_cache_key(self, request, view):
-        username = request.data.get("username") if hasattr(request.data, "get") else None
-        if not isinstance(username, str) or not username.strip():
+        value = request.data.get(self.field) if hasattr(request.data, "get") else None
+        if not isinstance(value, str) or not value.strip():
             return None
-        return self.cache_format % {"scope": self.scope, "ident": username.strip().lower()}
+        return self.cache_format % {"scope": self.scope, "ident": value.strip().lower()}
+
+
+class PasswordResetRateThrottle(LoginRateThrottle):
+    """Limits reset emails per submitted address, so the endpoint can't be used to flood an inbox."""
+
+    scope = "password_reset"
+    field = "email"

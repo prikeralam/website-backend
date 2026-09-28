@@ -178,8 +178,9 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
     ),
-    # Only views that opt in are throttled; `login` guards POST /api/v1/token/ (per username).
-    "DEFAULT_THROTTLE_RATES": {"login": "5/min"},
+    # Only views that opt in are throttled; `login` guards POST /api/v1/token/ (per username),
+    # `password_reset` guards POST /api/v1/password-reset/ (per email).
+    "DEFAULT_THROTTLE_RATES": {"login": "5/min", "password_reset": "5/hour"},
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
     "SEARCH_PARAM": "q",
@@ -210,6 +211,24 @@ SPECTACULAR_SETTINGS = {
         {"name": "Module C — Data Repository"},
     ],
 }
+
+
+# Email (invites and password resets). Printed to the console in dev; deployed environments send
+# over SMTP: Gmail for staging, Amazon SES for production, chosen by env values alone.
+
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.smtp.EmailBackend" if DEPLOYED
+    else "django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = env("EMAIL_HOST", default="localhost")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="PRI <no-reply@localhost>")
+# Where emailed links point: the frontend owns the /reset-password page.
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000").rstrip("/")
 
 
 # CORS — allow the companion Next.js frontend's dev server
