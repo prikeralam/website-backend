@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
     "corsheaders",
     "django_filters",
@@ -97,6 +98,14 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
     "default": env.db("DATABASE_URL", default="sqlite:///" + str(BASE_DIR / "db.sqlite3")),
+}
+
+
+# Cache: database-backed so throttle counters are shared by every gunicorn worker and instance.
+# The table is created by apps/accounts/migrations/0002_cache_table.py.
+
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.db.DatabaseCache", "LOCATION": "pri_cache"},
 }
 
 
@@ -169,6 +178,8 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
     ),
+    # Only views that opt in are throttled; `login` guards POST /api/v1/token/ (per username).
+    "DEFAULT_THROTTLE_RATES": {"login": "5/min"},
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
     "SEARCH_PARAM": "q",
