@@ -72,6 +72,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # The server pulls the private image with this job's token.
+      packages: read
     steps:
       - uses: actions/checkout@v4
 

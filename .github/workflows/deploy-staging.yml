@@ -55,6 +55,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment: staging
+    permissions:
+      contents: read
+      # The server pulls the private image with this job's token.
+      packages: read
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ssh-deploy
