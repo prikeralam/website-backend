@@ -353,7 +353,6 @@ class Command(BaseCommand):
         for role in Role.values:
             user, _ = User.objects.get_or_create(username=f"demo_{role}", defaults={"email": f"{role}@demo.example"})
             user.role = role
-            user.is_staff = user.is_superuser = role == Role.ADMIN
             user.set_password(password)
             user.save()
             users[role] = user
