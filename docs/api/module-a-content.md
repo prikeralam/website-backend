@@ -46,6 +46,13 @@ Both sit next to the existing URL fields (`photo_url`, `image_url`), so a photo 
 - Send `null` (JSON) or an empty value (multipart) to remove the upload. Omitting the field leaves it unchanged.
 - Partners are `PersonProfile`s, so their logo upload is `photo`.
 
+## Contact links — `PersonProfile.linkedin_url`, `PersonProfile.email`
+
+Optional, and public on the people endpoints: the site shows them as icon links on each profile. Leave `email` blank for anyone who shouldn't have a public address.
+
+- `linkedin_url` must be `https://` on `linkedin.com` or one of its subdomains (400 on the field otherwise), because the public site links to it directly.
+- `email` is a validated address.
+
 ## SEO meta defaulting
 
 PRD line 40: SEO title/description should default to a derived value (e.g. truncated body) if left blank at publish time. `seo_title`/`seo_description` fields already exist on `ContentBlock` (per ERD `content_contentblock`, `docs/erd/pri_platform_schema.sql:112-125`) but the defaulting logic itself isn't implemented — this is serializer/model `save()`-level logic to build, not a new endpoint.
