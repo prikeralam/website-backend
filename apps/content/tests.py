@@ -1,6 +1,8 @@
+import tempfile
 from importlib import import_module
 
 from django.apps import apps
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -175,3 +177,64 @@ class PersonPhotoMigrationTests(TestCase):
         self.assertEqual(prototype.photo_url, "https://staging.example.org/people/team/noushad.jpg")
         self.assertEqual(elsewhere.photo_url, "https://cdn.example.com/people/team/b.jpg")
         self.assertEqual(empty.photo_url, "")
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class ImageUploadTests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.editor = make_user(get_user_model(), "editor", "editor1")
+        self.client.force_authenticate(self.editor)
+
+    def create_person(self, **extra):
+        data = {"slug": "asha", "name": "Asha", "role_title": "Analyst", "group": "team", **extra}
+        return self.client.post("/api/v1/people/", data, format="multipart")
+
+    def test_uploaded_photo_is_returned_as_a_url(self):
+        response = self.create_person(photo=SimpleUploadedFile("asha.png", PNG, content_type="image/png"))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertRegex(response.data["photo"], r"/people/asha[^/]*\.png$")
+        self.assertEqual(response.data["photo_url"], "")
+
+    def test_rejects_files_that_are_not_images(self):
+        response = self.create_person(photo=SimpleUploadedFile("cv.pdf", b"%PDF-1.4", content_type="application/pdf"))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("photo", response.data)
+
+    def test_rejects_images_over_5_mb(self):
+        big = SimpleUploadedFile("big.jpg", b"\xff" * (5 * 1024 * 1024 + 1), content_type="image/jpeg")
+        response = self.create_person(photo=big)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("photo", response.data)
+
+    def test_null_or_empty_removes_the_upload(self):
+        created = self.create_person(photo=SimpleUploadedFile("asha.png", PNG, content_type="image/png")).data
+        cleared = self.client.patch(f"/api/v1/people/{created['id']}/", {"photo": None}, format="json")
+        self.assertEqual(cleared.status_code, 200, cleared.data)
+        self.assertIsNone(cleared.data["photo"])
+
+        self.client.patch(
+            f"/api/v1/people/{created['id']}/",
+            {"photo": SimpleUploadedFile("again.png", PNG, content_type="image/png")},
+            format="multipart",
+        )
+        cleared = self.client.patch(f"/api/v1/people/{created['id']}/", {"photo": ""}, format="multipart")
+        self.assertEqual(cleared.status_code, 200, cleared.data)
+        self.assertIsNone(cleared.data["photo"])
+
+    def test_editing_other_fields_keeps_the_upload(self):
+        created = self.create_person(photo=SimpleUploadedFile("asha.png", PNG, content_type="image/png")).data
+        updated = self.client.patch(f"/api/v1/people/{created['id']}/", {"bio": "New bio"}, format="json")
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.data["photo"], created["photo"])
+
+    def test_projects_take_an_uploaded_image(self):
+        image = SimpleUploadedFile("p.webp", b"RIFF", content_type="image/webp")
+        data = {"slug": "p", "title": "P", "blurb": "B", "image": image}
+        response = self.client.post("/api/v1/projects/", data, format="multipart")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data["image"].endswith(".webp"))

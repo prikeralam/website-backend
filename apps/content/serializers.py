@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.workflow.uploads import ImageUploadField
+
 from .models import ContentBlock, Document, PersonProfile, Testimonial
 
 WORKFLOW_READ_ONLY_FIELDS = ["status", "created_by", "reviewed_by", "created_at", "updated_at"]
@@ -59,6 +61,8 @@ class TestimonialSerializer(serializers.ModelSerializer):
 
 
 class PersonProfileSerializer(serializers.ModelSerializer):
+    photo = ImageUploadField()
+
     class Meta:
         model = PersonProfile
         fields = [
@@ -69,6 +73,7 @@ class PersonProfileSerializer(serializers.ModelSerializer):
             "group",
             "bio",
             "photo_url",
+            "photo",
             "status",
             "created_by",
             "reviewed_by",

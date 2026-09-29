@@ -37,6 +37,15 @@ Per ERD (`docs/erd/pri_platform_schema.sql:158-172`), `content_document` needs t
 
 Both exist solely to support the `?type=&year=` filter PRD story 9 asks for.
 
+## Uploaded images — `PersonProfile.photo`, `Project.image`
+
+Both sit next to the existing URL fields (`photo_url`, `image_url`), so a photo can be uploaded from a computer or linked. When both are set, clients show the upload.
+
+- Write with `multipart/form-data`. JPG, JPEG, PNG or WebP only, 5 MB at most (400 on the field otherwise).
+- Read as the file's URL (presigned on S3, like document files), or `null` when there is no upload.
+- Send `null` (JSON) or an empty value (multipart) to remove the upload. Omitting the field leaves it unchanged.
+- Partners are `PersonProfile`s, so their logo upload is `photo`.
+
 ## SEO meta defaulting
 
 PRD line 40: SEO title/description should default to a derived value (e.g. truncated body) if left blank at publish time. `seo_title`/`seo_description` fields already exist on `ContentBlock` (per ERD `content_contentblock`, `docs/erd/pri_platform_schema.sql:112-125`) but the defaulting logic itself isn't implemented — this is serializer/model `save()`-level logic to build, not a new endpoint.

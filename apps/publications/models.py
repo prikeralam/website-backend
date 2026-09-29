@@ -3,6 +3,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 from apps.workflow.models import WorkflowMixin
+from apps.workflow.uploads import IMAGE_VALIDATORS
 
 
 class Publication(WorkflowMixin):
@@ -39,6 +40,8 @@ class Publication(WorkflowMixin):
     tags = ArrayField(models.CharField(max_length=50), blank=True, default=list)
     views = models.PositiveIntegerField(default=0)
     cover_url = models.URLField(blank=True)
+    # An uploaded cover wins over cover_url when both are set.
+    cover = models.FileField(upload_to="covers/", blank=True, validators=IMAGE_VALIDATORS)
 
     def __str__(self):
         return self.title

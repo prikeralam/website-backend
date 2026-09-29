@@ -1,9 +1,13 @@
 from rest_framework import serializers
 
+from apps.workflow.uploads import ImageUploadField
+
 from .models import Project
 
 
 class ProjectSerializer(serializers.ModelSerializer):
+    image = ImageUploadField()
+
     class Meta:
         model = Project
         fields = [
@@ -12,6 +16,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             "title",
             "blurb",
             "image_url",
+            "image",
             "cta_label",
             "cta_href",
             "status",
