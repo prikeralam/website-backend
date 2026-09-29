@@ -1,9 +1,13 @@
 from rest_framework import serializers
 
+from apps.workflow.uploads import ImageUploadField
+
 from .models import Publication, PublicationVersion
 
 
 class PublicationSerializer(serializers.ModelSerializer):
+    cover = ImageUploadField()
+
     class Meta:
         model = Publication
         fields = [
@@ -21,6 +25,7 @@ class PublicationSerializer(serializers.ModelSerializer):
             "tags",
             "views",
             "cover_url",
+            "cover",
             "status",
             "created_by",
             "reviewed_by",
