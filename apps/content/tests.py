@@ -238,3 +238,45 @@ class ImageUploadTests(APITestCase):
         response = self.client.post("/api/v1/projects/", data, format="multipart")
         self.assertEqual(response.status_code, 201, response.data)
         self.assertTrue(response.data["image"].endswith(".webp"))
+
+
+class PersonContactLinkTests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.editor = make_user(get_user_model(), "editor", "editor1")
+        self.client.force_authenticate(self.editor)
+
+    def create(self, **extra):
+        data = {"slug": "asha", "name": "Asha", "role_title": "Analyst", "group": "team", **extra}
+        return self.client.post("/api/v1/people/", data, format="json")
+
+    def test_saves_and_publishes_linkedin_and_email(self):
+        response = self.create(linkedin_url="https://www.linkedin.com/in/asha", email="asha@priresearch.in")
+        self.assertEqual(response.status_code, 201, response.data)
+
+        person = PersonProfile.objects.get(slug="asha")
+        person.status = WorkflowStatus.PUBLISHED
+        person.published_at = timezone.now()
+        person.save()
+        self.client.force_authenticate(None)
+        public = self.client.get("/api/v1/people/?group=team").data["results"][0]
+        self.assertEqual(public["linkedin_url"], "https://www.linkedin.com/in/asha")
+        self.assertEqual(public["email"], "asha@priresearch.in")
+
+    def test_both_are_optional(self):
+        response = self.create()
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual((response.data["linkedin_url"], response.data["email"]), ("", ""))
+
+    def test_linkedin_link_must_be_https_on_linkedin(self):
+        for url in ["http://www.linkedin.com/in/asha", "https://evil.example/linkedin.com", "https://linkedin.com.evil.example/in/a"]:
+            with self.subTest(url=url):
+                response = self.create(slug=f"p-{abs(hash(url)) % 10000}", linkedin_url=url)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("linkedin_url", response.data)
+
+    def test_rejects_an_invalid_email(self):
+        response = self.create(email="not-an-email")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.data)
