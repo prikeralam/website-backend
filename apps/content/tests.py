@@ -1,3 +1,7 @@
+from importlib import import_module
+
+from django.apps import apps
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -143,3 +147,31 @@ class WorkflowTransitionPermissionTests(APITestCase):
             f"/api/v1/content-blocks/{self.block.slug}/transition/", {"status": "approved"}
         )
         self.assertEqual(response.status_code, 200)
+
+
+class PersonPhotoMigrationTests(TestCase):
+    migration = import_module("apps.content.migrations.0004_person_photos_on_frontend")
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.user = make_user(get_user_model(), "editor", "editor1")
+
+    def person(self, slug, photo_url):
+        return PersonProfile.objects.create(
+            slug=slug, name=slug, role_title="Role", group="team", photo_url=photo_url, created_by=self.user
+        )
+
+    @override_settings(FRONTEND_URL="https://staging.example.org")
+    def test_moves_prototype_photos_to_the_frontend_and_leaves_others_alone(self):
+        prototype = self.person("a", "https://pri-website-pink.vercel.app/people/team/noushad.jpg")
+        elsewhere = self.person("b", "https://cdn.example.com/people/team/b.jpg")
+        empty = self.person("c", "")
+
+        self.migration.rewrite_photo_urls(apps, None)
+
+        for obj in (prototype, elsewhere, empty):
+            obj.refresh_from_db()
+        self.assertEqual(prototype.photo_url, "https://staging.example.org/people/team/noushad.jpg")
+        self.assertEqual(elsewhere.photo_url, "https://cdn.example.com/people/team/b.jpg")
+        self.assertEqual(empty.photo_url, "")
