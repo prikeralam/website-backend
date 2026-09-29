@@ -25,6 +25,7 @@ Per PRD's Implementation Decisions (`docs/PRDs/B-publication-repository-module.m
 - **`external_id`** — DOI if issued else internal slug (PRD line 29). Not a v1 requirement to mint real DOIs (PRD Out of Scope, line 42).
 - **`visibility`** — `public`/`private` (PRD line 32). Enforcement: private publications excluded from public list/detail responses — same discipline as Module C's tiers.
 - **`tags`** — Postgres `ArrayField`.
+- **`cover`** — optional uploaded cover image beside `cover_url`; same rules as Module A's image uploads (JPG/PNG/WebP, 5 MB, `null` removes, the upload wins when both are set).
 - **`PublicationVersion`** — `publication` FK, `version_number`, `file`, `uploaded_by`, `is_current`, `created_at` (PRD line 29-30). `file` uses the S3-backed storage decision (see [README.md](README.md#file-storage)).
 
 ## Citation export

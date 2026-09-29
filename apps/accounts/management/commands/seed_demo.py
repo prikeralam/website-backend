@@ -33,7 +33,6 @@ from apps.taxonomy.models import Theme
 
 User = get_user_model()
 
-SITE = "https://pri-website-pink.vercel.app"
 UNSPLASH = "https://images.unsplash.com/photo-1521737604893-d14cc237f11d"
 PDF_BYTES = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
 TBS = "Biography to be supplied."
@@ -389,17 +388,19 @@ class Command(BaseCommand):
         )
 
     def seed_people(self):
+        # The photos are files in the frontend's public/people/ folder, served by this environment's frontend.
+        site = settings.FRONTEND_URL
         for name, title, photo in TEAM:
-            self.person(name, title, "team", photo_url=f"{SITE}/people/team/{photo}")
+            self.person(name, title, "team", photo_url=f"{site}/people/team/{photo}")
         for name, photo in PATRONS:
-            self.person(name, "Patron", "patron", photo_url=f"{SITE}/people/patrons/{photo}")
+            self.person(name, "Patron", "patron", photo_url=f"{site}/people/patrons/{photo}")
         for name, title, photo in EXECUTIVE:
-            self.person(name, title, "executive", photo_url=f"{SITE}/people/executive/{photo}" if photo else "")
+            self.person(name, title, "executive", photo_url=f"{site}/people/executive/{photo}" if photo else "")
         for number in range(1, 11):
             self.person(f"Advisory Member {number}", "Advisory Body", "advisory")
         for name, description, logo in PARTNERS:
             self.person(
-                name, "Partner institution", "partner", bio=description, photo_url=f"{SITE}/people/partners/{logo}"
+                name, "Partner institution", "partner", bio=description, photo_url=f"{site}/people/partners/{logo}"
             )
         self.person("Draft Profile", "Analyst", "team", bio="Demo row: a draft profile.", status="draft")
         return self.person("PRI Research Team", "Research team", "author", bio="Authors of PRI's data stories.")

@@ -69,6 +69,14 @@ class SeedDemoTests(TestCase):
         self.assertTrue(chairman.photo_url.endswith("/people/executive/sayyid-sadiq-ali-shihab.jpg"))
         self.assertFalse(PersonProfile.objects.filter(group="patron", photo_url="").exists())
 
+    @override_settings(FRONTEND_URL="https://staging.example.org")
+    def test_person_photos_come_from_this_environments_frontend(self):
+        seed()
+        photos = PersonProfile.objects.exclude(photo_url="").values_list("photo_url", flat=True)
+        self.assertTrue(photos)
+        for url in photos:
+            self.assertTrue(url.startswith("https://staging.example.org/people/"), url)
+
     def test_every_preview_format_works_on_the_demo_datasets(self):
         seed()
         client = APIClient()
