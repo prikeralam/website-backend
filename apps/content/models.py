@@ -51,6 +51,9 @@ class PersonProfile(WorkflowMixin):
     photo_url = models.URLField(blank=True)
     # An uploaded photo wins over photo_url when both are set.
     photo = models.FileField(upload_to="people/", blank=True, validators=IMAGE_VALIDATORS)
+    # Public contact links shown on the people pages; both optional.
+    linkedin_url = models.URLField(blank=True)
+    email = models.EmailField(blank=True)
 
     def __str__(self):
         return self.name
