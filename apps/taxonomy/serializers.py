@@ -17,7 +17,7 @@ class ThemeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Theme
-        fields = ["id", "slug", "name", "parent", "subthemes"]
+        fields = ["id", "slug", "name", "description", "parent", "subthemes"]
 
     def validate_parent(self, parent):
         if parent is not None and parent.parent_id is not None:

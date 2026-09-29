@@ -30,6 +30,34 @@ class Dataset(WorkflowMixin):
     source = models.CharField(max_length=200, blank=True)
     update_frequency = models.CharField(max_length=50, blank=True)
     visibility = models.CharField(max_length=15, choices=VISIBILITY_CHOICES, default="internal_only")
+    granularity = models.CharField(max_length=120, blank=True)
+    time_period = models.CharField(max_length=60, blank=True)
+    # Custom citation text; clients build a default one when it's blank.
+    citation = models.TextField(blank=True)
+    # Worked out from the file whenever it changes (see save()); empty when the file can't be read.
+    row_count = models.PositiveIntegerField(null=True, blank=True)
+    column_count = models.PositiveIntegerField(null=True, blank=True)
+    columns = models.JSONField(default=list, blank=True)
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_file_name = instance.file.name if "file" in field_names else None
+        return instance
+
+    def refresh_file_stats(self):
+        from .previews import profile_file
+
+        profile = profile_file(self)
+        self.row_count, self.columns = (profile[0], profile[1]) if profile else (None, [])
+        self.column_count = len(self.columns) if profile else None
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.file and self.file.name != getattr(self, "_loaded_file_name", None):
+            self.refresh_file_stats()
+            super().save(update_fields=["row_count", "column_count", "columns"])
+            self._loaded_file_name = self.file.name
 
     def __str__(self):
         return self.title

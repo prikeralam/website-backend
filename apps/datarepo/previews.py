@@ -45,12 +45,9 @@ def _parquet_page(stream, start, page_size):
         raise PreviewError("The parquet file could not be read.") from exc
 
 
-def _zip_page(stream, start, page_size):
-    try:
-        archive = zipfile.ZipFile(stream)
-    except zipfile.BadZipFile as exc:
-        raise PreviewError("The zip file could not be read.") from exc
-    member = next(
+def _first_csv(archive):
+    """The first CSV file in a zip archive (macOS metadata folders skipped), or None."""
+    return next(
         (
             info
             for info in archive.infolist()
@@ -60,6 +57,14 @@ def _zip_page(stream, start, page_size):
         ),
         None,
     )
+
+
+def _zip_page(stream, start, page_size):
+    try:
+        archive = zipfile.ZipFile(stream)
+    except zipfile.BadZipFile as exc:
+        raise PreviewError("The zip file could not be read.") from exc
+    member = _first_csv(archive)
     if member is None:
         raise PreviewError("The zip file contains no CSV file to preview.")
     with archive.open(member) as csv_stream:
@@ -79,3 +84,45 @@ def table_page(dataset, page, page_size):
         raise UnsupportedFormat(dataset.format)
     with dataset.file.open("rb") as stream:
         return pager(stream, (page - 1) * page_size, page_size)
+
+
+def _count_csv(stream):
+    reader = csv.reader(io.TextIOWrapper(stream, encoding="utf-8"))
+    header = next(reader, [])
+    return sum(1 for _ in reader), header
+
+
+def profile_file(dataset):
+    """(row_count, column names) for the dataset's file, or None when it can't be read.
+
+    CSV, the first CSV in a ZIP, and Parquet count data rows; GeoJSON counts features and lists the property names
+    in first-seen order.
+    """
+    try:
+        if dataset.format == "parquet":
+            with dataset.file.open("rb") as stream:
+                parquet_file = pq.ParquetFile(stream)
+                return parquet_file.metadata.num_rows, list(parquet_file.schema_arrow.names)
+        if dataset.format == "geojson":
+            from .geo import load_geojson
+
+            data = load_geojson(dataset)
+            features = data.get("features", []) if data.get("type") == "FeatureCollection" else [data]
+            names = {}
+            for feature in features:
+                for key in (feature.get("properties") or {}) if isinstance(feature, dict) else {}:
+                    names.setdefault(key, None)
+            return len(features), list(names)
+        with dataset.file.open("rb") as stream:
+            if dataset.format == "zip":
+                archive = zipfile.ZipFile(stream)
+                member = _first_csv(archive)
+                if member is None:
+                    return None
+                with archive.open(member) as csv_stream:
+                    return _count_csv(csv_stream)
+            if dataset.format == "csv":
+                return _count_csv(stream)
+    except Exception:  # noqa: BLE001 - a file we can't profile must never break saving the dataset
+        return None
+    return None
