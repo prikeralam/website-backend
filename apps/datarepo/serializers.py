@@ -1,7 +1,9 @@
 from rest_framework import serializers
 
-from .models import AccessRequest, Dashboard, Dataset
-from .permissions import can_download
+from apps.publications.models import Publication
+
+from .models import AccessRequest, Collection, Dashboard, Dataset
+from .permissions import can_download, visible_datasets_for
 
 WORKFLOW_READ_ONLY_FIELDS = ["status", "created_by", "reviewed_by", "created_at", "updated_at", "published_at"]
 
@@ -98,3 +100,47 @@ class AccessRequestSerializer(serializers.ModelSerializer):
 
 class AccessRequestReviewSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=[("approved", "Approved"), ("denied", "Denied")])
+
+
+class CollectionSerializer(serializers.ModelSerializer):
+    # Datasets and the linked publication are read and written by slug.
+    datasets = serializers.SlugRelatedField(
+        slug_field="slug", many=True, queryset=Dataset.objects.all(), required=False
+    )
+    publication = serializers.SlugRelatedField(
+        slug_field="slug", queryset=Publication.objects.all(), required=False, allow_null=True
+    )
+
+    class Meta:
+        model = Collection
+        fields = [
+            "id",
+            "slug",
+            "title",
+            "description",
+            "datasets",
+            "publication",
+            "status",
+            "created_by",
+            "reviewed_by",
+            "created_at",
+            "updated_at",
+            "published_at",
+        ]
+        read_only_fields = WORKFLOW_READ_ONLY_FIELDS
+
+    def to_representation(self, instance):
+        # List only the datasets this caller could open: the same workflow and visibility-tier rules as the
+        # dataset endpoints, so a collection never reveals a draft or internal dataset, not even its slug.
+        from apps.workflow.permissions import visible_workflow_objects
+
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        visible = visible_datasets_for(user, visible_workflow_objects(user, instance.datasets.all()))
+        data["datasets"] = list(visible.values_list("slug", flat=True))
+        return data
+
+    def create(self, validated_data):
+        validated_data["created_by"] = self.context["request"].user
+        return super().create(validated_data)

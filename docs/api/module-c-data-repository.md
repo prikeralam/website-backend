@@ -49,6 +49,10 @@ Per PRD Implementation Decisions (`docs/PRDs/C-data-repository-dashboard-integra
 - `row_count`, `column_count` and `columns` (the column names): read-only, worked out from the file whenever it changes (`Dataset.save()`): data rows for CSV, the first CSV in a ZIP and Parquet; features and property names for GeoJSON. A file that can't be read leaves them empty (`null`, `null`, `[]`) and never fails the save. Migration `datarepo.0005` fills them for existing datasets; `manage.py refresh_dataset_stats` recomputes them all.
 - `Theme.description`: optional overview for a theme's page.
 
+## Collections
+
+`GET/POST /api/v1/collections/`, `/collections/{slug}/` (workflowed, as datasets): a named bundle of related datasets, for example everything behind one data story. `datasets` is a list of dataset slugs and `publication` an optional publication slug, both written by slug. Each caller sees only the datasets it could open itself: the same workflow and visibility-tier rules as the dataset endpoints, so a collection never reveals a draft or internal dataset, not even its slug.
+
 ## Visibility enforcement (server-side, not UI hiding)
 
 Carried verbatim from PRD lines 36-39 — this is the module's core correctness guarantee:
