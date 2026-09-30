@@ -73,13 +73,23 @@ jobs:
           tags: pri-backend:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Container serves /healthz/ against a real database
+      - name: Container serves /healthz/ and reports healthy, against a real database
+        # ALLOWED_HOSTS holds only a real-looking name, as on the deployed hosts, so a health check that
+        # addresses 127.0.0.1 fails here too.
         run: |
           docker network create ci
           docker run -d --name db --network ci -e POSTGRES_USER=pri -e POSTGRES_PASSWORD=pri -e POSTGRES_DB=pri postgres:16-alpine
           for i in $(seq 1 30); do docker exec db pg_isready -U pri && break; sleep 2; done
-          docker run -d --name web --network ci -p 8000:8000             -e ENVIRONMENT=staging -e DEBUG=False -e SECRET_KEY=ci-only-secret-key             -e ALLOWED_HOSTS=localhost,127.0.0.1 -e AWS_STORAGE_BUCKET_NAME=ci-bucket             -e DATABASE_URL=postgresql://pri:pri@db:5432/pri pri-backend:ci
+          docker run -d --name web --network ci -p 8000:8000             -e ENVIRONMENT=staging -e DEBUG=False -e SECRET_KEY=ci-only-secret-key             -e ALLOWED_HOSTS=api.ci.test -e AWS_STORAGE_BUCKET_NAME=ci-bucket             -e DATABASE_URL=postgresql://pri:pri@db:5432/pri pri-backend:ci
           docker exec web python manage.py migrate --noinput
-          for i in $(seq 1 30); do curl -fsS http://localhost:8000/healthz/ && exit 0; sleep 2; done
+          for i in $(seq 1 30); do curl -fsS -H "Host: api.ci.test" http://localhost:8000/healthz/ && break; sleep 2; done
+          # Docker's own HEALTHCHECK (config/healthcheck.py): start period 20s, then every 30s.
+          for i in $(seq 1 45); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' web)
+            [ "$status" = healthy ] && echo "container healthy" && exit 0
+            sleep 2
+          done
+          echo "container health: $status"
+          docker inspect --format '{{json .State.Health}}' web
           docker logs web
           exit 1

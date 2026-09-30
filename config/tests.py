@@ -5,7 +5,7 @@ from unittest import mock
 
 from django.conf import settings
 from django.db import OperationalError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 
 class HealthCheckTests(TestCase):
@@ -20,6 +20,23 @@ class HealthCheckTests(TestCase):
             response = self.client.get("/healthz/")
 
         self.assertEqual(response.status_code, 503)
+
+
+class ContainerHealthcheckTests(TestCase):
+    def test_addresses_the_check_to_the_first_allowed_host(self):
+        from config.healthcheck import health_host
+
+        self.assertEqual(health_host("api-staging.priresearch.in"), "api-staging.priresearch.in")
+        self.assertEqual(health_host(" .priresearch.in , localhost"), "priresearch.in")
+        self.assertEqual(health_host("*"), "localhost")
+        self.assertEqual(health_host(""), "localhost")
+
+    @override_settings(ALLOWED_HOSTS=["api.example.org"])
+    def test_the_chosen_host_passes_django_host_validation(self):
+        from config.healthcheck import health_host
+
+        self.assertEqual(self.client.get("/healthz/", HTTP_HOST="127.0.0.1:8000").status_code, 400)
+        self.assertEqual(self.client.get("/healthz/", HTTP_HOST=health_host("api.example.org")).status_code, 200)
 
 
 def _load_settings(**overrides):
