@@ -321,6 +321,135 @@ paths:
               schema:
                 $ref: '#/components/schemas/Collection'
           description: ''
+  /api/v1/contact/:
+    post:
+      operationId: v1_contact_create
+      description: The public contact form. Anyone may send a message; it is stored
+        and emailed to PRI.
+      tags:
+      - Module G — Contact
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactSubmission'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ContactSubmission'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ContactSubmission'
+        required: true
+      security:
+      - {}
+      responses:
+        '201':
+          description: Received.
+        '400':
+          description: Invalid fields.
+        '429':
+          description: Too many messages.
+  /api/v1/contact-messages/:
+    get:
+      operationId: v1_contact_messages_list
+      description: 'The inbox: editors and admins read messages and mark them handled
+        (or new again).'
+      parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+          enum:
+          - general
+          - media
+          - research
+        description: |-
+          * `research` - Research
+          * `media` - Media
+          * `general` - General
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - handled
+          - new
+        description: |-
+          * `new` - New
+          * `handled` - Handled
+      tags:
+      - Module G — Contact
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedContactMessageList'
+          description: ''
+  /api/v1/contact-messages/{id}/:
+    get:
+      operationId: v1_contact_messages_retrieve
+      description: 'The inbox: editors and admins read messages and mark them handled
+        (or new again).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this contact message.
+        required: true
+      tags:
+      - Module G — Contact
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactMessage'
+          description: ''
+    patch:
+      operationId: v1_contact_messages_partial_update
+      description: 'The inbox: editors and admins read messages and mark them handled
+        (or new again).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this contact message.
+        required: true
+      tags:
+      - Module G — Contact
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedContactMessage'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedContactMessage'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedContactMessage'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactMessage'
+          description: ''
   /api/v1/content-blocks/:
     get:
       operationId: v1_content_blocks_list
@@ -3698,6 +3827,16 @@ components:
       - module
       - target
       - timestamp
+    CategoryEnum:
+      enum:
+      - research
+      - media
+      - general
+      type: string
+      description: |-
+        * `research` - Research
+        * `media` - Media
+        * `general` - General
     Collection:
       type: object
       properties:
@@ -3754,6 +3893,84 @@ components:
       - status
       - title
       - updated_at
+    ContactMessage:
+      type: object
+      description: A message as staff see it. Only `status` can be changed.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        category:
+          allOf:
+          - $ref: '#/components/schemas/CategoryEnum'
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        message:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/ContactMessageStatusEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        handled_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        handled_by:
+          type: integer
+          readOnly: true
+          nullable: true
+      required:
+      - category
+      - created_at
+      - email
+      - handled_at
+      - handled_by
+      - id
+      - message
+      - name
+    ContactMessageStatusEnum:
+      enum:
+      - new
+      - handled
+      type: string
+      description: |-
+        * `new` - New
+        * `handled` - Handled
+    ContactSubmission:
+      type: object
+      description: 'What a visitor sends. `website` is a honeypot: the form hides
+        it, so only bots fill it in.'
+      properties:
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+        name:
+          type: string
+          maxLength: 120
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        message:
+          type: string
+          maxLength: 5000
+        website:
+          type: string
+          writeOnly: true
+          maxLength: 200
+      required:
+      - email
+      - message
+      - name
     ContentBlock:
       type: object
       properties:
@@ -4286,6 +4503,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Collection'
+    PaginatedContactMessageList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContactMessage'
     PaginatedContentBlockList:
       type: object
       required:
@@ -4668,6 +4908,42 @@ components:
         published_at:
           type: string
           format: date-time
+          readOnly: true
+          nullable: true
+    PatchedContactMessage:
+      type: object
+      description: A message as staff see it. Only `status` can be changed.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        category:
+          allOf:
+          - $ref: '#/components/schemas/CategoryEnum'
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        message:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/ContactMessageStatusEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        handled_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        handled_by:
+          type: integer
           readOnly: true
           nullable: true
     PatchedContentBlock:

@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "apps.publications",
     "apps.datarepo",
     "apps.impact",
+    "apps.contact",
 ]
 
 MIDDLEWARE = [
@@ -180,8 +181,14 @@ REST_FRAMEWORK = {
         "django_filters.rest_framework.DjangoFilterBackend",
     ),
     # Only views that opt in are throttled; `login` guards POST /api/v1/token/ (per username),
-    # `password_reset` guards POST /api/v1/password-reset/ (per email).
-    "DEFAULT_THROTTLE_RATES": {"login": "5/min", "password_reset": "5/hour"},
+    # `password_reset` guards POST /api/v1/password-reset/ (per email); `contact` and
+    # `contact_global` guard POST /api/v1/contact/ (per sender address, and in total).
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "5/min",
+        "password_reset": "5/hour",
+        "contact": "5/hour",
+        "contact_global": env("CONTACT_GLOBAL_RATE", default="200/hour"),
+    },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
     "SEARCH_PARAM": "q",
@@ -228,6 +235,8 @@ EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="PRI <no-reply@localhost>")
+# Where contact-form messages are emailed (every category goes to this one address).
+CONTACT_EMAIL = env("CONTACT_EMAIL", default="contact@priresearch.in")
 # Where emailed links point: the frontend owns the /reset-password page.
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000").rstrip("/")
 
