@@ -1,5 +1,5 @@
 name: SSH deploy
-description: Upload the compose file, nginx template and env file to an EC2 host and run deploy/remote-deploy.sh there.
+description: Upload the compose file, nginx templates and env file to an EC2 host and run deploy/remote-deploy.sh there.
 
 inputs:
   host:
@@ -88,7 +88,7 @@ runs:
       run: |
         { printf '%s\n' "$APP_ENV_FILE"; echo "IMAGE=$IMAGE"; } > "$RUNNER_TEMP/.env.new"
         scp "$COMPOSE_FILE" target:/opt/pri-backend/docker-compose.yml
-        scp deploy/nginx.conf.template deploy/remote-deploy.sh "$RUNNER_TEMP/.env.new" target:/opt/pri-backend/
+        scp deploy/nginx.conf.template deploy/nginx.http.conf.template deploy/remote-deploy.sh "$RUNNER_TEMP/.env.new" target:/opt/pri-backend/
         rm -f "$RUNNER_TEMP/.env.new"
 
     - name: Log the server in to GHCR

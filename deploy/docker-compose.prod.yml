@@ -1,23 +1,11 @@
-# Production: app + nginx on the prod EC2 instance. The database is the separate RDS
-# instance named in DATABASE_URL (no Postgres container here).
-# Copied to /opt/pri-backend by the deploy-prod workflow, next to a rendered .env.
+# Production: the app on the production host (deploy/aws/host.yml), which it shares with the
+# frontend. The database is the one named in DATABASE_URL (no Postgres container here).
+# The app listens on localhost only; the host's nginx routes to it.
+# Copied to /opt/pri-backend by the deploy-production workflow, next to a rendered .env.
 services:
   web:
     image: ${IMAGE}
     restart: unless-stopped
     env_file: .env
-
-  nginx:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      SERVER_NAME: ${SERVER_NAME}
-    volumes:
-      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-      - /var/www/certbot:/var/www/certbot:ro
-    depends_on:
-      - web
+      - "127.0.0.1:8000:8000"
