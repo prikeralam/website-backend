@@ -1,4 +1,6 @@
-# Staging: app + its own Postgres container + nginx, on the staging EC2 instance.
+# Staging: app + its own Postgres container, on the staging host (deploy/aws/host.yml), which it
+# shares with the frontend. The app listens on localhost only; the host's nginx routes to it
+# (deploy/nginx.conf.template, installed by remote-deploy.sh).
 # Copied to /opt/pri-backend by the deploy-staging workflow, next to a rendered .env
 # (compose reads .env there for ${...} below and for the app via env_file).
 services:
@@ -21,24 +23,11 @@ services:
     image: ${IMAGE}
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
-
-  nginx:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      SERVER_NAME: ${SERVER_NAME}
-    volumes:
-      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-      - /var/www/certbot:/var/www/certbot:ro
-    depends_on:
-      - web
 
 volumes:
   pri_staging_pg:

@@ -40,6 +40,9 @@ docker compose run --rm --no-deps web python manage.py migrate --plan || rollbac
 docker compose run --rm --no-deps web python manage.py migrate --noinput || rollback
 docker compose up -d --remove-orphans || rollback
 
+# The host's nginx routes this app's name to it (HTTPS once a certificate exists; see deploy/aws/host.yml).
+sudo /usr/local/sbin/pri-nginx-site pri-backend "$server_name" /opt/pri-backend || rollback
+
 healthy=0
 for _ in $(seq 1 30); do
   if curl -fsS -H "Host: $server_name" http://localhost/healthz/ >/dev/null; then
