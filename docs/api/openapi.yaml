@@ -3212,6 +3212,24 @@ components:
           maxLength: 50
         visibility:
           $ref: '#/components/schemas/DatasetVisibilityEnum'
+        granularity:
+          type: string
+          maxLength: 120
+        time_period:
+          type: string
+          maxLength: 60
+        citation:
+          type: string
+        row_count:
+          type: integer
+          readOnly: true
+          nullable: true
+        column_count:
+          type: integer
+          readOnly: true
+          nullable: true
+        columns:
+          readOnly: true
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
@@ -3237,6 +3255,8 @@ components:
           readOnly: true
           nullable: true
       required:
+      - column_count
+      - columns
       - created_at
       - created_by
       - file
@@ -3244,6 +3264,7 @@ components:
       - id
       - published_at
       - reviewed_by
+      - row_count
       - slug
       - status
       - sub_theme
@@ -3880,6 +3901,24 @@ components:
           maxLength: 50
         visibility:
           $ref: '#/components/schemas/DatasetVisibilityEnum'
+        granularity:
+          type: string
+          maxLength: 120
+        time_period:
+          type: string
+          maxLength: 60
+        citation:
+          type: string
+        row_count:
+          type: integer
+          readOnly: true
+          nullable: true
+        column_count:
+          type: integer
+          readOnly: true
+          nullable: true
+        columns:
+          readOnly: true
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
@@ -4219,6 +4258,8 @@ components:
         name:
           type: string
           maxLength: 50
+        description:
+          type: string
         parent:
           type: integer
           nullable: true
@@ -4631,6 +4672,8 @@ components:
         name:
           type: string
           maxLength: 50
+        description:
+          type: string
         parent:
           type: integer
           nullable: true

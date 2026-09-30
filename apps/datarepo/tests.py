@@ -366,3 +366,97 @@ class DatasetSubThemeRequirementTests(APITestCase):
         response = self.client.get(f"/api/v1/datasets/?theme={self.top_level_theme.pk}")
         slugs = {item["slug"] for item in response.data["results"]}
         self.assertEqual(slugs, {"demo-ds-1", "demo-ds-2"})
+
+
+class DatasetFileStatsTests(APITestCase):
+    """Row and column stats are worked out from the file whenever it changes, and never block a save."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_user(username="admin", password="pw12345", role="admin")
+        health = Theme.objects.get(slug="health")
+        self.sub_theme = Theme.objects.create(slug="stats-sub", name="Stats Sub", parent=health)
+
+    def _dataset(self, name, content, fmt, **extra):
+        return Dataset.objects.create(
+            slug=name.split(".")[0],
+            title=name,
+            file=SimpleUploadedFile(name, content),
+            format=fmt,
+            sub_theme=self.sub_theme,
+            visibility="public",
+            status="published",
+            created_by=self.admin,
+            **extra,
+        )
+
+    def test_counts_rows_and_names_columns_for_each_format(self):
+        table = pa.table({"district": ["Malappuram", "Kollam"], "seats": [65, 40]})
+        parquet = io.BytesIO()
+        pq.write_table(table, parquet)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as z:
+            z.writestr("__MACOSX/a.csv", "junk\n")
+            z.writestr("data.csv", "a,b,c\n1,2,3\n4,5,6\n7,8,9\n")
+        geojson = json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {"type": "Feature", "properties": {"district": "A", "value": 1}, "geometry": None},
+                    {"type": "Feature", "properties": {"district": "B", "note": "x"}, "geometry": None},
+                ],
+            }
+        ).encode()
+
+        cases = [
+            ("csv-ds.csv", b"x,y\n1,2\n3,4\n", "csv", 2, ["x", "y"]),
+            ("parquet-ds.parquet", parquet.getvalue(), "parquet", 2, ["district", "seats"]),
+            ("zip-ds.zip", archive.getvalue(), "zip", 3, ["a", "b", "c"]),
+            ("geo-ds.geojson", geojson, "geojson", 2, ["district", "value", "note"]),
+        ]
+        for name, content, fmt, rows, columns in cases:
+            with self.subTest(fmt=fmt):
+                dataset = self._dataset(name, content, fmt)
+                dataset.refresh_from_db()
+                stats = (dataset.row_count, dataset.column_count, dataset.columns)
+                self.assertEqual(stats, (rows, len(columns), columns))
+
+    def test_an_unreadable_file_leaves_stats_empty_without_failing(self):
+        dataset = self._dataset("broken.parquet", b"not parquet", "parquet")
+        dataset.refresh_from_db()
+        self.assertEqual((dataset.row_count, dataset.column_count, dataset.columns), (None, None, []))
+
+    def test_recomputes_when_the_file_changes_but_not_on_other_edits(self):
+        dataset = self._dataset("changing.csv", b"a\n1\n", "csv")
+        dataset = Dataset.objects.get(pk=dataset.pk)
+        with mock.patch("apps.datarepo.previews.profile_file") as profile:
+            dataset.title = "Renamed"
+            dataset.save()
+            profile.assert_not_called()
+        dataset.file = SimpleUploadedFile("changing2.csv", b"a,b\n1,2\n3,4\n5,6\n")
+        dataset.save()
+        dataset.refresh_from_db()
+        self.assertEqual((dataset.row_count, dataset.columns), (3, ["a", "b"]))
+
+    def test_api_shows_the_new_fields_and_keeps_stats_read_only(self):
+        extra = {"granularity": "District, Year", "time_period": "2014-15 to 2024-25"}
+        dataset = self._dataset("api-ds.csv", b"a,b\n1,2\n", "csv", **extra)
+        self.client.force_authenticate(self.admin)
+        body = self.client.get(f"/api/v1/datasets/{dataset.slug}/").data
+        self.assertEqual(
+            tuple(body[k] for k in ["granularity", "time_period", "citation", "row_count", "column_count", "columns"]),
+            ("District, Year", "2014-15 to 2024-25", "", 1, 2, ["a", "b"]),
+        )
+        changes = {"row_count": 999, "citation": "PRI (2026)."}
+        self.client.patch(f"/api/v1/datasets/{dataset.slug}/", changes, format="json")
+        dataset.refresh_from_db()
+        self.assertEqual((dataset.row_count, dataset.citation), (1, "PRI (2026)."))
+
+    def test_themes_carry_a_description(self):
+        health = Theme.objects.get(slug="health")
+        health.description = "Public health in Kerala."
+        health.save()
+        body = self.client.get("/api/v1/themes/").data
+        themes = body["results"] if isinstance(body, dict) else body
+        self.assertEqual(next(t for t in themes if t["slug"] == "health")["description"], "Public health in Kerala.")
