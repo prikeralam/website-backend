@@ -104,3 +104,18 @@ class AccessRequest(models.Model):
 
     def __str__(self):
         return f"{self.user} -> {self.dataset} ({self.status})"
+
+
+class Collection(WorkflowMixin):
+    """A named bundle of related datasets, for example everything behind one data story."""
+
+    slug = models.SlugField(unique=True)
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    datasets = models.ManyToManyField(Dataset, related_name="collections", blank=True)
+    publication = models.ForeignKey(
+        "publications.Publication", null=True, blank=True, on_delete=models.SET_NULL, related_name="collections"
+    )
+
+    def __str__(self):
+        return self.title

@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "apps.projects",
     "apps.publications",
     "apps.datarepo",
+    "apps.impact",
 ]
 
 MIDDLEWARE = [
