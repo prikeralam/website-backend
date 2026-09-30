@@ -22,6 +22,12 @@ class DatasetSerializer(serializers.ModelSerializer):
             "source",
             "update_frequency",
             "visibility",
+            "granularity",
+            "time_period",
+            "citation",
+            "row_count",
+            "column_count",
+            "columns",
             "status",
             "created_by",
             "reviewed_by",
@@ -29,7 +35,7 @@ class DatasetSerializer(serializers.ModelSerializer):
             "updated_at",
             "published_at",
         ]
-        read_only_fields = WORKFLOW_READ_ONLY_FIELDS
+        read_only_fields = [*WORKFLOW_READ_ONLY_FIELDS, "row_count", "column_count", "columns"]
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

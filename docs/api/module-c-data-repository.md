@@ -43,6 +43,12 @@ Per PRD Implementation Decisions (`docs/PRDs/C-data-repository-dashboard-integra
 - **`Dashboard`** — `slug`, `title`, `description`, `embed_url`, `embed_type` (`datawrapper`/`tableau`/`d3`), `theme` FK (direct, to any `Theme` — **not** rescoped to sub-themes-only, unlike `Dataset`/`Publication`), `geography`, `year`, `type`, linked `Dataset`(s) (M2M), plus `WorkflowMixin` fields.
 - **`AccessRequest`** — `user` FK, `dataset` FK, `status` (`pending`/`approved`/`denied`), `requested_at`, `reviewed_at`, `reviewed_by`. Unique per (`user`, `dataset`).
 
+## Descriptive fields and file stats
+
+- `granularity` (e.g. "District, Year"), `time_period` (e.g. "2014-15 to 2024-25") and `citation` (custom citation text; clients build a default one when it's blank): optional and editable.
+- `row_count`, `column_count` and `columns` (the column names): read-only, worked out from the file whenever it changes (`Dataset.save()`): data rows for CSV, the first CSV in a ZIP and Parquet; features and property names for GeoJSON. A file that can't be read leaves them empty (`null`, `null`, `[]`) and never fails the save. Migration `datarepo.0005` fills them for existing datasets; `manage.py refresh_dataset_stats` recomputes them all.
+- `Theme.description`: optional overview for a theme's page.
+
 ## Visibility enforcement (server-side, not UI hiding)
 
 Carried verbatim from PRD lines 36-39 — this is the module's core correctness guarantee:
