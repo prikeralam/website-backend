@@ -15,10 +15,16 @@ from apps.workflow.permissions import STAFF_ROLES, CanSubmitDraft
 from apps.workflow.views import WorkflowViewSetMixin
 
 from .geo import GeoJSONError, GeoJSONTooLarge, load_geojson
-from .models import AccessRequest, Dashboard, Dataset
+from .models import AccessRequest, Collection, Dashboard, Dataset
 from .permissions import can_download, visible_datasets_for
 from .previews import PreviewError, UnsupportedFormat, table_page
-from .serializers import AccessRequestReviewSerializer, AccessRequestSerializer, DashboardSerializer, DatasetSerializer
+from .serializers import (
+    AccessRequestReviewSerializer,
+    AccessRequestSerializer,
+    CollectionSerializer,
+    DashboardSerializer,
+    DatasetSerializer,
+)
 
 MODULE_TAG = "Module C — Data Repository"
 
@@ -128,6 +134,14 @@ class DashboardViewSet(WorkflowViewSetMixin, ModelViewSet):
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["theme", "geography", "year", "type"]
+
+
+@extend_schema(tags=[MODULE_TAG])
+class CollectionViewSet(WorkflowViewSetMixin, ModelViewSet):
+    queryset = Collection.objects.prefetch_related("datasets").select_related("publication")
+    serializer_class = CollectionSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
+    lookup_field = "slug"
 
 
 @extend_schema(tags=[MODULE_TAG])

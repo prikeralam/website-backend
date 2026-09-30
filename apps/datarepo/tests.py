@@ -460,3 +460,45 @@ class DatasetFileStatsTests(APITestCase):
         body = self.client.get("/api/v1/themes/").data
         themes = body["results"] if isinstance(body, dict) else body
         self.assertEqual(next(t for t in themes if t["slug"] == "health")["description"], "Public health in Kerala.")
+
+
+class CollectionTests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.editor = User.objects.create_user(username="editor", password="pw12345", role="editor")
+        self.visitor = User.objects.create_user(username="visitor", password="pw12345", role="public")
+        health = Theme.objects.get(slug="health")
+        sub = Theme.objects.create(slug="coll-sub", name="Coll Sub", parent=health)
+
+        def dataset(slug, visibility, status="published"):
+            return Dataset.objects.create(
+                slug=slug, title=slug, file=SimpleUploadedFile(f"{slug}.csv", b"a\n1\n"), format="csv",
+                sub_theme=sub, visibility=visibility, status=status, created_by=self.editor,
+            )
+
+        dataset("open-ds", "public")
+        dataset("gated-ds", "on_request")
+        dataset("internal-ds", "internal_only")
+        dataset("draft-ds", "public", status="draft")
+
+    def test_editor_creates_a_collection_by_dataset_slugs(self):
+        self.client.force_authenticate(self.editor)
+        data = {"slug": "plus-one", "title": "Plus One", "datasets": ["open-ds", "gated-ds", "internal-ds", "draft-ds"]}
+        response = self.client.post("/api/v1/collections/", data, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(sorted(response.data["datasets"]), ["draft-ds", "gated-ds", "internal-ds", "open-ds"])
+
+    def test_public_callers_never_see_draft_or_internal_datasets_in_a_collection(self):
+        self.client.force_authenticate(self.editor)
+        data = {"slug": "plus-one", "title": "Plus One", "datasets": ["open-ds", "gated-ds", "internal-ds", "draft-ds"]}
+        self.client.post("/api/v1/collections/", data, format="json")
+        for status in ("in_review", "approved", "published"):
+            self.client.post("/api/v1/collections/plus-one/transition/", {"status": status}, format="json")
+
+        for user in (None, self.visitor):
+            with self.subTest(user=user):
+                self.client.force_authenticate(user)
+                body = self.client.get("/api/v1/collections/plus-one/").data
+                self.assertEqual(sorted(body["datasets"]), ["gated-ds", "open-ds"])
