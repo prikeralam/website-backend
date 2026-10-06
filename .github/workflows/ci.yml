@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pri_backend
+          POSTGRES_PASSWORD: pri_backend_ci_password
+          POSTGRES_DB: pri_backend
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pri_backend"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SECRET_KEY: ci-only-secret-key
+      DEBUG: "False"
+      DATABASE_URL: postgresql://pri_backend:pri_backend_ci_password@localhost:5432/pri_backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python manage.py check
+      - name: Fail if models changed without a migration
+        run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py migrate --noinput
+      - run: python manage.py test
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: pri-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Container serves /healthz/ and reports healthy, against a real database
+        # ALLOWED_HOSTS holds only a real-looking name, as on the deployed hosts, so a health check that
+        # addresses 127.0.0.1 fails here too.
+        run: |
+          docker network create ci
+          docker run -d --name db --network ci -e POSTGRES_USER=pri -e POSTGRES_PASSWORD=pri -e POSTGRES_DB=pri postgres:16-alpine
+          for i in $(seq 1 30); do docker exec db pg_isready -U pri && break; sleep 2; done
+          docker run -d --name web --network ci -p 8000:8000             -e ENVIRONMENT=staging -e DEBUG=False -e SECRET_KEY=ci-only-secret-key             -e ALLOWED_HOSTS=api.ci.test -e AWS_STORAGE_BUCKET_NAME=ci-bucket             -e DATABASE_URL=postgresql://pri:pri@db:5432/pri pri-backend:ci
+          docker exec web python manage.py migrate --noinput
+          for i in $(seq 1 30); do curl -fsS -H "Host: api.ci.test" http://localhost:8000/healthz/ && break; sleep 2; done
+          # Docker's own HEALTHCHECK (config/healthcheck.py): start period 20s, then every 30s.
+          for i in $(seq 1 45); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' web)
+            [ "$status" = healthy ] && echo "container healthy" && exit 0
+            sleep 2
+          done
+          echo "container health: $status"
+          docker inspect --format '{{json .State.Health}}' web
+          docker logs web
+          exit 1

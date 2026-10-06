@@ -1,0 +1,75 @@
+name: Deploy staging
+
+# Merge to `staging` = tests -> build image -> deploy to the staging EC2 instance.
+# Secrets live in the `staging` GitHub Environment; see docs/deploy/aws-provisioning.md.
+
+on:
+  push:
+    branches: [staging]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=${repo}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          # The tree hash is identical for staging and the merge into main, so production can
+          # find and promote exactly the image that was tested here.
+          echo "tree_image=${repo}:tree-$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.tree_image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      # The server pulls the private image with this job's token.
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ssh-deploy
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          user: ${{ secrets.EC2_USER }}
+          ssh-key: ${{ secrets.EC2_SSH_KEY }}
+          known-hosts: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+          app-env-file: ${{ secrets.APP_ENV_FILE }}
+          expected-environment: staging
+          compose-file: deploy/docker-compose.staging.yml
+          image: ${{ needs.build.outputs.image }}
+          ghcr-user: ${{ github.actor }}
+          ghcr-token: ${{ secrets.GITHUB_TOKEN }}

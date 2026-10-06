@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import WorkflowStatus
-from .permissions import CanTransitionStatus
+from .permissions import CanTransitionStatus, visible_workflow_objects
 from .serializers import TransitionSerializer
 
 
@@ -15,6 +15,9 @@ class WorkflowViewSetMixin:
     validates the target status, applies role-gated permission checks,
     updates the object, and writes an AuditLog row.
     """
+
+    def get_queryset(self):
+        return visible_workflow_objects(self.request.user, super().get_queryset())
 
     def get_permissions(self):
         if self.action == "transition":

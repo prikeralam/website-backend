@@ -1,0 +1,33 @@
+# Staging: app + its own Postgres container, on the staging host (deploy/aws/host.yml), which it
+# shares with the frontend. The app listens on localhost only; the host's nginx routes to it
+# (deploy/nginx.conf.template, installed by remote-deploy.sh).
+# Copied to /opt/pri-backend by the deploy-staging workflow, next to a rendered .env
+# (compose reads .env there for ${...} below and for the app via env_file).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pri_staging_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    image: ${IMAGE}
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pri_staging_pg:

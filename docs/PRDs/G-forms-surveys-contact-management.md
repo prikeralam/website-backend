@@ -2,6 +2,8 @@
 
 **Backend module G** · Status: Drafted · Future phase — not yet prioritized for build · Feeds: [Partner & Consortium Network](../frontend/08-partner-consortium-network.md), [Events & Campaigns](../frontend/10-events-campaigns.md), [Get Involved](../frontend/11-get-involved.md), [Contact & Newsletter](../frontend/12-contact-newsletter.md) · Depends on: none directly
 
+> **2026-09-30 amendment:** the contact form alone is built (website-backend #54, `docs/api/module-g-contact.md`): a fixed `ContactMessage` model rather than `FormDefinition`/`FormSubmission`, one notification address, a honeypot and throttling instead of CAPTCHA, and no CRM sync or export. The generic engine below remains the plan once a second form is needed; the contact form can then become its first instance.
+
 ## Problem Statement
 
 At least seven different frontend forms across the site (newsletter signup, volunteer, intern-interest, event registration, media/research/general contact, partnership forms, suggestions, whistleblower) currently have nowhere to submit to — without one consistent, secure form-handling backend, each would need its own ad hoc storage, spam protection, and routing logic, multiplying effort and creating inconsistent security/reliability across the site's most direct visitor-to-PRI touchpoints.

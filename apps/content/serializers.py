@@ -1,4 +1,8 @@
+from urllib.parse import urlparse
+
 from rest_framework import serializers
+
+from apps.workflow.uploads import ImageUploadField
 
 from .models import ContentBlock, Document, PersonProfile, Testimonial
 
@@ -59,6 +63,8 @@ class TestimonialSerializer(serializers.ModelSerializer):
 
 
 class PersonProfileSerializer(serializers.ModelSerializer):
+    photo = ImageUploadField()
+
     class Meta:
         model = PersonProfile
         fields = [
@@ -69,6 +75,9 @@ class PersonProfileSerializer(serializers.ModelSerializer):
             "group",
             "bio",
             "photo_url",
+            "photo",
+            "linkedin_url",
+            "email",
             "status",
             "created_by",
             "reviewed_by",
@@ -76,6 +85,16 @@ class PersonProfileSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = WORKFLOW_READ_ONLY_FIELDS
+
+    def validate_linkedin_url(self, value):
+        # Shown as a link on the public site, so it may only point at LinkedIn itself.
+        if not value:
+            return value
+        parts = urlparse(value)
+        host = (parts.hostname or "").lower()
+        if parts.scheme != "https" or not (host == "linkedin.com" or host.endswith(".linkedin.com")):
+            raise serializers.ValidationError("Enter an https:// link to a linkedin.com profile.")
+        return value
 
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user

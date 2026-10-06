@@ -1,5 +1,12 @@
 # Branch Protection Setup — apply to both `pri-frontend` and `pri-backend`
 
+> **Automated:** `scripts/setup-github-protection.sh` applies sections 2-4 and 6 (rulesets and Environments) and prints the
+> secrets still to add by hand. It is safe to re-run.
+>
+> **Plan limit:** rulesets and environment reviewers on a private repo need GitHub Pro/Team (or a public repo). On Free the
+> script reports a 403 for those steps. Until the plan changes, the workflow in CONTRIBUTING.md is followed by convention:
+> CI and `pr-guard` still run on every PR but do not block merging, so merge only when they are green.
+
 Run through this once per repo, right after creation, before the first commit lands.
 
 ## 1. Create branches

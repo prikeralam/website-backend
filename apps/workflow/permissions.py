@@ -1,3 +1,4 @@
+from django.db.models import Q
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 from .models import WorkflowStatus
@@ -8,6 +9,19 @@ STAFF_ROLES = {"editor", "admin"}
 
 def _role(request):
     return getattr(request.user, "role", None)
+
+
+def visible_workflow_objects(user, queryset):
+    """Who may see which workflowed objects (docs/api/README.md permission matrix): editor/admin
+    see everything, contributors see published objects plus their own, everyone else -
+    including anonymous visitors - sees published objects only."""
+    role = getattr(user, "role", None)
+    if role in STAFF_ROLES:
+        return queryset
+    published = Q(status=WorkflowStatus.PUBLISHED)
+    if role in CONTRIBUTOR_ROLES:
+        return queryset.filter(published | Q(created_by=user))
+    return queryset.filter(published)
 
 
 class CanSubmitDraft(BasePermission):

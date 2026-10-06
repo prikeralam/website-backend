@@ -28,6 +28,7 @@ class PublicationVisibilityTests(APITestCase):
             sub_theme=self.sub_theme,
             date=date(2025, 1, 1),
             visibility="private",
+            status="published",
             created_by=self.owner,
         )
         self.public_pub = Publication.objects.create(
@@ -38,6 +39,7 @@ class PublicationVisibilityTests(APITestCase):
             sub_theme=self.sub_theme,
             date=date(2025, 1, 1),
             visibility="public",
+            status="published",
             created_by=self.owner,
         )
 

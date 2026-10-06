@@ -8,16 +8,16 @@ All four resources below share `apps/workflow`'s `WorkflowMixin` (status field) 
 
 | Method & Path | Auth | Filters | Status |
 |---|---|---|---|
-| `GET/POST /api/v1/content-blocks/` | Auth (write: contributor role) | — | **Built** — `apps/content/views.py`, `apps/content/urls.py` |
-| `GET /api/v1/content-blocks/{slug}/` | Auth | — | **To build** — PRD story 13 / `docs/PRDs/A-content-management-system.md:42`. Router currently looks up by `pk`; needs `lookup_field="slug"`. |
-| `GET/PATCH/DELETE /api/v1/content-blocks/{pk}/` | Auth (own draft or staff) | — | **Built** |
-| `POST /api/v1/content-blocks/{pk}/transition/` | Auth (role-gated) | — | **Built** — shared `WorkflowViewSetMixin` action |
-| `GET/POST /api/v1/testimonials/` | Auth | — | **Built** |
-| `GET/POST /api/v1/people/` | Auth | — | **Built** |
-| `GET /api/v1/people/?group=` | Auth | `group` | **To build** — PRD story 8 (line 22). Field exists (`PersonProfile.group`); needs `filterset_fields = ["group"]` added to the viewset. |
-| `GET/POST /api/v1/documents/` | Auth | — | **Built** |
-| `GET /api/v1/documents/?type=&year=` | Auth | `document_type`, `year` | **To build** — PRD story 9 (line 23). Fields don't exist in code yet; ERD flags them explicitly not-yet-built (`docs/erd/README.md:77`, `docs/erd/pri_platform_schema.sql:164-165`). |
-| `GET /api/v1/updates/latest/?limit=&types=` | Auth | `limit`, `types` | **To build** — PRD story 10 (lines 24, 46). Cross-type feed of most recently published content. |
+| `GET/POST /api/v1/content-blocks/` | Public read; write: contributor role | — | **Built** — `apps/content/views.py`, `apps/content/urls.py` |
+| `GET /api/v1/content-blocks/{slug}/` | Public read | — | **Built** — PRD story 13 / `docs/PRDs/A-content-management-system.md:42`. Looked up by `slug`. |
+| `GET/PATCH/DELETE /api/v1/content-blocks/{slug}/` | Public read; write: own draft or staff | — | **Built** |
+| `POST /api/v1/content-blocks/{slug}/transition/` | Auth (role-gated) | — | **Built** — shared `WorkflowViewSetMixin` action |
+| `GET/POST /api/v1/testimonials/` | Public read; write: contributor role | — | **Built** |
+| `GET/POST /api/v1/people/` | Public read; write: contributor role | — | **Built** |
+| `GET /api/v1/people/?group=` | Public read | `group` | **Built** — PRD story 8 (line 22). |
+| `GET/POST /api/v1/documents/` | Public read; write: contributor role | — | **Built** |
+| `GET /api/v1/documents/?document_type=&year=` | Public read | `document_type`, `year` | **Built** — PRD story 9 (line 23). |
+| `GET /api/v1/updates/latest/?limit=&types=` | Public | `limit`, `types` | **Built** — PRD story 10 (lines 24, 46). Cross-type feed of most recently published content. |
 
 Every content-type resource also gets `POST /{pk}/transition/` (built, shared action) — omitted from the table above for brevity, one row per resource type.
 
@@ -36,6 +36,22 @@ Per ERD (`docs/erd/pri_platform_schema.sql:158-172`), `content_document` needs t
 - `year` — nullable integer.
 
 Both exist solely to support the `?type=&year=` filter PRD story 9 asks for.
+
+## Uploaded images — `PersonProfile.photo`, `Project.image`
+
+Both sit next to the existing URL fields (`photo_url`, `image_url`), so a photo can be uploaded from a computer or linked. When both are set, clients show the upload.
+
+- Write with `multipart/form-data`. JPG, JPEG, PNG or WebP only, 5 MB at most (400 on the field otherwise).
+- Read as the file's URL (presigned on S3, like document files), or `null` when there is no upload.
+- Send `null` (JSON) or an empty value (multipart) to remove the upload. Omitting the field leaves it unchanged.
+- Partners are `PersonProfile`s, so their logo upload is `photo`.
+
+## Contact links — `PersonProfile.linkedin_url`, `PersonProfile.email`
+
+Optional, and public on the people endpoints: the site shows them as icon links on each profile. Leave `email` blank for anyone who shouldn't have a public address.
+
+- `linkedin_url` must be `https://` on `linkedin.com` or one of its subdomains (400 on the field otherwise), because the public site links to it directly.
+- `email` is a validated address.
 
 ## SEO meta defaulting
 

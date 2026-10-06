@@ -10,14 +10,14 @@ All endpoints taken from the PRD's own API surface list (`docs/PRDs/C-data-repos
 
 | Method & Path | Auth | Filters | Status |
 |---|---|---|---|
-| `GET /api/v1/datasets/?sub_theme=&theme=&geography=&year=&q=` | Auth, visibility-filtered | `sub_theme` (exact), `theme` (top-level, via `sub_theme__parent_id`), `geography`, `year`, `q` | **Built** — `apps/datarepo/views.py`'s `DatasetFilter` |
-| `GET /api/v1/datasets/{slug}/` | Auth, visibility-filtered | — | **Built, flagged deviation** — see below |
-| `GET /api/v1/datasets/{slug}/preview/table/?page=` | Auth, visibility-filtered | `page` | **Built** — CSV only; `parquet`/`zip` return `501` (no parser dependency approved yet) |
-| `GET /api/v1/datasets/{slug}/preview/map/` | Auth, visibility-filtered | — | **Built as a `501` stub** — no spatial format exists in the committed `format` choices (`csv`/`parquet`/`zip`); needs a real decision before this can return real data |
-| `GET /api/v1/datasets/{slug}/download/` | Auth, visibility+access-gated | — | **Built** |
+| `GET /api/v1/datasets/?sub_theme=&theme=&geography=&year=&q=` | Public read, visibility-filtered | `sub_theme` (exact), `theme` (top-level, via `sub_theme__parent_id`), `geography`, `year`, `q` | **Built** — `apps/datarepo/views.py`'s `DatasetFilter` |
+| `GET /api/v1/datasets/{slug}/` | Public read, visibility-filtered | — | **Built, flagged deviation** — see below |
+| `GET /api/v1/datasets/{slug}/preview/table/?page=` | Public read, visibility-filtered | `page` | **Built** — `csv`; `parquet` (via `pyarrow`, 50 rows per page, non-JSON cell types stringified); `zip` (first `.csv` member). An unreadable file, or a zip with no CSV, returns `422` |
+| `GET /api/v1/datasets/{slug}/preview/map/` | Public read, visibility-filtered | — | **Built** — `geojson` datasets only: the file is parsed and returned as-is for the frontend to render (10 MB cap, `413` above it). A non-`geojson` dataset, or a file that isn't valid GeoJSON, returns `422` |
+| `GET /api/v1/datasets/{slug}/download/` | Public for the `public` tier; signed-in with an approved request for `on_request` | — | **Built** |
 | `POST /api/v1/datasets/{slug}/request-access/` | Authenticated | — | **Built** — creates an `AccessRequest` |
 | `POST /api/v1/datasets/{slug}/transition/` | Auth (role-gated) | — | **Built** — shared `WorkflowViewSetMixin` action, same as A/B |
-| `GET /api/v1/dashboards/?theme=&geography=&year=&type=` | Auth, visibility-filtered | `theme`, `geography`, `year`, `type` | **Built** — `theme` here is a direct FK (Dashboard wasn't asked to require a sub-theme, unlike Dataset) |
+| `GET /api/v1/dashboards/?theme=&geography=&year=&type=` | Public read, published only | `theme`, `geography`, `year`, `type` | **Built** — `theme` here is a direct FK (Dashboard wasn't asked to require a sub-theme, unlike Dataset) |
 | `GET /api/v1/access-requests/?status=&dataset=` | Editor/Admin only | `status`, `dataset` | **Built, addition beyond this doc** — needed so staff can discover which `{id}`s are pending before the `PATCH` below is usable |
 | `PATCH /api/v1/access-requests/{id}/` | Editor/Admin only | — | **Built** — proposed shape below, now implemented |
 
@@ -43,11 +43,21 @@ Per PRD Implementation Decisions (`docs/PRDs/C-data-repository-dashboard-integra
 - **`Dashboard`** — `slug`, `title`, `description`, `embed_url`, `embed_type` (`datawrapper`/`tableau`/`d3`), `theme` FK (direct, to any `Theme` — **not** rescoped to sub-themes-only, unlike `Dataset`/`Publication`), `geography`, `year`, `type`, linked `Dataset`(s) (M2M), plus `WorkflowMixin` fields.
 - **`AccessRequest`** — `user` FK, `dataset` FK, `status` (`pending`/`approved`/`denied`), `requested_at`, `reviewed_at`, `reviewed_by`. Unique per (`user`, `dataset`).
 
+## Descriptive fields and file stats
+
+- `granularity` (e.g. "District, Year"), `time_period` (e.g. "2014-15 to 2024-25") and `citation` (custom citation text; clients build a default one when it's blank): optional and editable.
+- `row_count`, `column_count` and `columns` (the column names): read-only, worked out from the file whenever it changes (`Dataset.save()`): data rows for CSV, the first CSV in a ZIP and Parquet; features and property names for GeoJSON. A file that can't be read leaves them empty (`null`, `null`, `[]`) and never fails the save. Migration `datarepo.0005` fills them for existing datasets; `manage.py refresh_dataset_stats` recomputes them all.
+- `Theme.description`: optional overview for a theme's page.
+
+## Collections
+
+`GET/POST /api/v1/collections/`, `/collections/{slug}/` (workflowed, as datasets): a named bundle of related datasets, for example everything behind one data story. `datasets` is a list of dataset slugs and `publication` an optional publication slug, both written by slug. Each caller sees only the datasets it could open itself: the same workflow and visibility-tier rules as the dataset endpoints, so a collection never reveals a draft or internal dataset, not even its slug.
+
 ## Visibility enforcement (server-side, not UI hiding)
 
 Carried verbatim from PRD lines 36-39 — this is the module's core correctness guarantee:
 
-- **`public`** — appears in search, preview and download open to anyone (subject to the site-wide "nothing public yet" default in [README.md](README.md#default-permission-model); revisit when a public/anonymous tier is actually turned on).
+- **`public`** — appears in search, preview and download open to anyone, including anonymous visitors, once the dataset is published (see [README.md](README.md#default-permission-model)).
 - **`on_request`** — appears in search with metadata and a "request access" action; preview may show a reduced/sample level (decide at build time); full download blocked until that user's `AccessRequest` is `approved`.
 - **`internal_only`** — **PRD's own flagged-for-stakeholder-confirmation assumption**, carried through unchanged: fully excluded from search/listing/detail for any non-staff (non Editor/Researcher/Admin) request — not just download-gated, genuinely invisible. Confirm with PRI before implementing, per the PRD's explicit note (line 118). **Implementation note:** since PRD line 39 frames `internal_only` as existing "for Admin/Editor/Researcher-authenticated internal use," download is gated to that same three-role group, not narrowed to Editor/Admin only — a Researcher who can see an `internal_only` dataset can also download it.
 

@@ -1,0 +1,264 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  PRI - one EC2 host per environment, shared by the backend and the frontend. Each repo deploys
+  its containers to /opt/pri-backend or /opt/pri-frontend, publishes them on localhost, and installs
+  its own nginx site through pri-nginx-site. Nginx and certbot run on the host. Also holds the
+  environment's private media bucket, reached through the instance role.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [staging, production]
+  ImageId:
+    Type: AWS::EC2::Image::Id
+    Description: >-
+      Ubuntu 24.04 amd64 AMI. Pinned rather than resolved from SSM on every update, because a new
+      AMI replaces the instance, and with it the Postgres volume and the certificates.
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+  SshPublicKey:
+    Type: String
+    Description: Public half of the deploy key (the private half is the EC2_SSH_KEY secret in both repos)
+  SshCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: GitHub-hosted runners have no fixed IPs, so SSH is open and key-only.
+
+Resources:
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub pri-${Environment}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      # Database dumps (deploy/backup-db.sh) are kept for 30 days; uploaded media never expires.
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-database-backups
+            Status: Enabled
+            Prefix: backups/
+            ExpirationInDays: 30
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub pri-${Environment}-host
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Session Manager: a way in if SSH or the key is ever lost.
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: media-bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt MediaBucket.Arn
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub ${MediaBucket.Arn}/*
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  DeployKey:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: !Sub pri-${Environment}-deploy
+      PublicKeyMaterial: !Ref SshPublicKey
+
+  HostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub pri-${Environment}-host
+      GroupDescription: !Sub PRI ${Environment} - HTTP, HTTPS and key-only SSH
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref SshCidr }
+
+  StaticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: !Sub "pri-${Environment}" }
+
+  Host:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref DeployKey
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds: [!GetAtt HostSecurityGroup.GroupId]
+      # Standard credits: a CPU-bound runaway throttles instead of billing surplus credits.
+      CreditSpecification:
+        CPUCredits: standard
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        # 2 hops so containers (one hop behind docker's bridge) can reach the role credentials.
+        HttpPutResponseHopLimit: 2
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 20
+            Encrypted: true
+      Tags:
+        - { Key: Name, Value: !Sub "pri-${Environment}" }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # First-boot bootstrap. Output lands in /var/log/pri-bootstrap.log.
+          set -euxo pipefail
+          exec > >(tee -a /var/log/pri-bootstrap.log) 2>&1
+          export DEBIAN_FRONTEND=noninteractive
+
+          # Swap keeps two apps, Postgres and nginx up through image pulls and spikes.
+          if [ ! -f /swapfile ]; then
+            fallocate -l 2G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+          # Cap container logs so they can't fill the 20 GB disk.
+          install -d /etc/docker
+          echo '{"log-driver": "json-file", "log-opts": {"max-size": "10m", "max-file": "3"}}' > /etc/docker/daemon.json
+
+          apt-get update
+          apt-get install -y ca-certificates curl nginx certbot gettext-base
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+          apt-get update
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          usermod -aG docker ubuntu
+
+          # Where each repo's deploy workflow uploads its compose file, nginx templates and .env.
+          install -d -o ubuntu -g ubuntu /opt/pri-backend /opt/pri-frontend
+          install -d /var/www/certbot
+
+          # Port 80 for any name: certbot's webroot challenges, and nothing else until a site claims the name.
+          rm -f /etc/nginx/sites-enabled/default
+          cat > /etc/nginx/conf.d/00-acme.conf <<'NGINX'
+          server {
+              listen 80 default_server;
+              server_name _;
+              location /.well-known/acme-challenge/ { root /var/www/certbot; }
+              location / { return 404; }
+          }
+          NGINX
+          # Sites share the challenge location; each site file includes this snippet.
+          cat > /etc/nginx/snippets/acme.conf <<'NGINX'
+          location /.well-known/acme-challenge/ { root /var/www/certbot; }
+          NGINX
+
+          # Renewals run from certbot's systemd timer through the webroot; reload nginx to pick them up.
+          install -d /etc/letsencrypt/renewal-hooks/deploy
+          printf '#!/bin/sh\nsystemctl reload nginx\n' > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+          chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+
+          # pri-nginx-site NAME SERVER_NAME DIR [ALIAS...]: installs DIR's site templates as NAME for SERVER_NAME.
+          # Uses DIR/nginx.conf.template (HTTPS) once a certificate covers SERVER_NAME and every ALIAS, and
+          # asks for one first when all of those names resolve to this host; until then
+          # DIR/nginx.http.conf.template. ALIAS names (e.g. www) redirect to SERVER_NAME through
+          # DIR/nginx.redirect.conf.template, or DIR/nginx.redirect.http.conf.template before the certificate.
+          cat > /usr/local/sbin/pri-nginx-site <<'SCRIPT'
+          #!/bin/bash
+          set -euo pipefail
+          name=$1 server_name=$2 dir=$3
+          shift 3
+          aliases=("$@")
+          valid_host() { [[ $1 =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; }
+          [[ $name =~ ^[a-z0-9-]+$ ]] && valid_host "$server_name" || { echo "bad site name" >&2; exit 1; }
+          for alias in "${!aliases[@]}"; do valid_host "$alias" || { echo "bad alias $alias" >&2; exit 1; }; done
+          names=("$server_name" "${!aliases[@]}")
+          cert=/etc/letsencrypt/live/$server_name/fullchain.pem
+
+          covers_all() {
+            [ -f "$cert" ] || return 1
+            local san
+            san=$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null)
+            for n in "${!names[@]}"; do grep -q "DNS:$n\b" <<< "$san" || return 1; done
+          }
+
+          if ! covers_all; then
+            token=$(curl -fsS -X PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 60" http://169.254.169.254/latest/api/token)
+            my_ip=$(curl -fsS -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/public-ipv4)
+            ready=1
+            for n in "${!names[@]}"; do
+              addresses=$(getent ahostsv4 "$n" | awk '{print $1}' || true)
+              grep -qx "$my_ip" <<< "$addresses" || { echo "$n does not resolve to $my_ip yet" >&2; ready=0; }
+            done
+            if [ "$ready" = 1 ]; then
+              domains=()
+              for n in "${!names[@]}"; do domains+=(-d "$n"); done
+              certbot certonly --webroot -w /var/www/certbot --non-interactive --agree-tos --expand \
+                --register-unsafely-without-email --cert-name "$server_name" "${!domains[@]}" \
+                || echo "certbot failed; keeping the current configuration" >&2
+            fi
+          fi
+
+          https=0
+          covers_all && https=1
+          render() { SERVER_NAME=$server_name SERVER_ALIASES="${!aliases[*]}" envsubst '${!SERVER_NAME} ${!SERVER_ALIASES}' < "$1"; }
+          {
+            if [ "$https" = 1 ]; then render "$dir/nginx.conf.template"; else render "$dir/nginx.http.conf.template"; fi
+            if [ "${!#aliases[@]}" -gt 0 ]; then
+              if [ "$https" = 1 ]; then render "$dir/nginx.redirect.conf.template"; else render "$dir/nginx.redirect.http.conf.template"; fi
+            fi
+          } > "/etc/nginx/conf.d/$name.conf.new"
+          mv "/etc/nginx/conf.d/$name.conf.new" "/etc/nginx/conf.d/$name.conf"
+          nginx -t
+          systemctl reload nginx
+          echo "nginx site $name: ${!names[*]} ($([ "$https" = 1 ] && echo https || echo http only))"
+          SCRIPT
+          # The deploy scripts run it with sudo (the ubuntu user has passwordless sudo on Ubuntu's AMIs).
+          chmod 755 /usr/local/sbin/pri-nginx-site
+
+          systemctl enable --now nginx
+          nginx -t && systemctl reload nginx
+          echo "bootstrap complete (${Environment})"
+
+  StaticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt StaticIp.AllocationId
+      InstanceId: !Ref Host
+
+Outputs:
+  PublicIp:
+    Description: EC2_HOST for both repos, and the A records for this environment's names
+    Value: !Ref StaticIp
+  BucketName:
+    Description: AWS_STORAGE_BUCKET_NAME for the backend env file
+    Value: !Ref MediaBucket
+  InstanceId:
+    Value: !Ref Host

@@ -1,0 +1,123 @@
+name: Deploy production
+
+# Merge to `main` = tests -> image (promoted from staging if it was already built there) ->
+# deploy to the production host (which backs up its database before migrating) -> tag + GitHub Release.
+# Secrets live in the `production` GitHub Environment; see docs/deploy/aws-provisioning.md.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      promoted: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=${repo}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "tree_image=${repo}:tree-$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Was this exact tree already built on staging?
+        id: check
+        run: |
+          if docker buildx imagetools inspect "${{ steps.meta.outputs.tree_image }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Promote the image tested on staging (no rebuild)
+        if: steps.check.outputs.exists == 'true'
+        run: docker buildx imagetools create --tag "${{ steps.meta.outputs.image }}" "${{ steps.meta.outputs.tree_image }}"
+      - name: Build (hotfix or unstaged change; nothing to promote)
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.tree_image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    # The manual gate is merging staging -> main (GitHub Free can't require reviewers on private-repo Environments).
+    environment: production
+    permissions:
+      contents: read
+      # The server pulls the private image with this job's token.
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/ssh-deploy
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          user: ${{ secrets.EC2_USER }}
+          ssh-key: ${{ secrets.EC2_SSH_KEY }}
+          known-hosts: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+          app-env-file: ${{ secrets.APP_ENV_FILE }}
+          expected-environment: production
+          compose-file: deploy/docker-compose.prod.yml
+          image: ${{ needs.image.outputs.image }}
+          ghcr-user: ${{ github.actor }}
+          ghcr-token: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    needs: [image, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag and publish a release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ needs.image.outputs.image }}
+          PROMOTED: ${{ needs.image.outputs.promoted }}
+        run: |
+          git fetch --tags --force
+          last=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)
+          if [ -z "$last" ]; then
+            next=v0.1.0
+          else
+            IFS=. read -r major minor patch <<< "${last#v}"
+            # Pre-1.0 Conventional Commits: any feat since the last tag bumps minor, everything else patch.
+            if git log --no-merges --format=%s "$last..HEAD" | grep -qE '^feat(\(.*\))?!?:'; then
+              next="v${major}.$((minor + 1)).0"
+            else
+              next="v${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+          source="built fresh on main"
+          [ "$PROMOTED" = true ] && source="promoted from the image tested on staging"
+          gh release create "$next" --target "$GITHUB_SHA" --title "$next" --generate-notes \
+            --notes "Image: \`$IMAGE\` ($source)"

@@ -1,6 +1,7 @@
 from django.db import models
 
 from apps.workflow.models import WorkflowMixin
+from apps.workflow.uploads import IMAGE_VALIDATORS
 
 
 class ContentBlock(WorkflowMixin):
@@ -48,6 +49,11 @@ class PersonProfile(WorkflowMixin):
     group = models.CharField(max_length=20, choices=GROUP_CHOICES)
     bio = models.TextField(blank=True)
     photo_url = models.URLField(blank=True)
+    # An uploaded photo wins over photo_url when both are set.
+    photo = models.FileField(upload_to="people/", blank=True, validators=IMAGE_VALIDATORS)
+    # Public contact links shown on the people pages; both optional.
+    linkedin_url = models.URLField(blank=True)
+    email = models.EmailField(blank=True)
 
     def __str__(self):
         return self.name

@@ -1,0 +1,44 @@
+name: PR guard
+
+# Enforces the promotion flow from CONTRIBUTING.md section 1:
+#   work branches -> dev -> staging -> main, plus hotfixes (fix/* from main) and their backports.
+# The `branch-flow` job is a required status check on dev, staging and main.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+    branches: [dev, staging, main]
+
+permissions:
+  contents: read
+
+jobs:
+  branch-flow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check source and target branches
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          case "$BASE" in
+            dev)
+              case "$HEAD" in
+                main|staging) fail "Never merge $HEAD back into dev. Fixes made on main reach dev as a backport/* PR." ;;
+              esac
+              ;;
+            staging)
+              case "$HEAD" in
+                dev|backport/*) ;;
+                *) fail "PRs into staging must come from dev (promotion) or backport/* (hotfix backport), not $HEAD." ;;
+              esac
+              ;;
+            main)
+              case "$HEAD" in
+                staging|fix/*) ;;
+                *) fail "PRs into main must come from staging (release) or fix/* (hotfix), not $HEAD." ;;
+              esac
+              ;;
+          esac
+          echo "$HEAD -> $BASE is an allowed promotion path."

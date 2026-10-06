@@ -5,6 +5,7 @@ from django.db import models
 class Theme(models.Model):
     slug = models.SlugField(unique=True)
     name = models.CharField(max_length=50)
+    description = models.TextField(blank=True)
     parent = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.CASCADE, related_name="subthemes"
     )
