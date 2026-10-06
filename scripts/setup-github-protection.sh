@@ -91,8 +91,7 @@ ruleset "protect-main" main merge
 step "Secrets still to add by hand (values are never handled by this script)"
 cat <<'TXT'
   environment "staging":    EC2_HOST EC2_USER EC2_SSH_KEY EC2_SSH_KNOWN_HOSTS APP_ENV_FILE
-  environment "production": EC2_HOST EC2_USER EC2_SSH_KEY EC2_SSH_KNOWN_HOSTS APP_ENV_FILE AWS_ROLE_ARN
-                            + variables AWS_REGION RDS_INSTANCE_ID
+  environment "production": EC2_HOST EC2_USER EC2_SSH_KEY EC2_SSH_KNOWN_HOSTS APP_ENV_FILE
   repository (optional):    BACKPORT_TOKEN
   Details and how to produce each value: docs/deploy/aws-provisioning.md
   Set one with: gh secret set NAME --env staging   (or --env production)

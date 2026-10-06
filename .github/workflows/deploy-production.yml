@@ -1,7 +1,7 @@
 name: Deploy production
 
 # Merge to `main` = tests -> image (promoted from staging if it was already built there) ->
-# manual approval -> RDS snapshot -> deploy to the prod EC2 instance -> tag + GitHub Release.
+# deploy to the production host (which backs up its database before migrating) -> tag + GitHub Release.
 # Secrets live in the `production` GitHub Environment; see docs/deploy/aws-provisioning.md.
 
 on:
@@ -67,41 +67,14 @@ jobs:
   deploy:
     needs: image
     runs-on: ubuntu-latest
-    # Required reviewers on this environment are the manual gate before anything touches prod.
+    # The manual gate is merging staging -> main (GitHub Free can't require reviewers on private-repo Environments).
     environment: production
     permissions:
       contents: read
-      id-token: write
       # The server pulls the private image with this job's token.
       packages: read
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check AWS settings
-        env:
-          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          RDS_INSTANCE_ID: ${{ vars.RDS_INSTANCE_ID }}
-        run: |
-          [ -n "$AWS_ROLE_ARN" ] || { echo "::error::Secret AWS_ROLE_ARN is not set in the production environment"; exit 1; }
-          [ -n "$AWS_REGION" ] || { echo "::error::Variable AWS_REGION is not set in the production environment"; exit 1; }
-          [ -n "$RDS_INSTANCE_ID" ] || { echo "::error::Variable RDS_INSTANCE_ID is not set in the production environment"; exit 1; }
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      # CONTRIBUTING.md section 7: back up prod Postgres before every deploy, since any release may migrate.
-      - name: Snapshot the production database
-        env:
-          RDS_INSTANCE_ID: ${{ vars.RDS_INSTANCE_ID }}
-        timeout-minutes: 45
-        run: |
-          snapshot="pri-predeploy-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA::7}"
-          aws rds create-db-snapshot --db-instance-identifier "$RDS_INSTANCE_ID" --db-snapshot-identifier "$snapshot"
-          aws rds wait db-snapshot-available --db-snapshot-identifier "$snapshot"
-          echo "Snapshot $snapshot is available" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: ./.github/actions/ssh-deploy
         with:
