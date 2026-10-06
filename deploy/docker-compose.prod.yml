@@ -1,11 +1,33 @@
-# Production: the app on the production host (deploy/aws/host.yml), which it shares with the
-# frontend. The database is the one named in DATABASE_URL (no Postgres container here).
-# The app listens on localhost only; the host's nginx routes to it.
+# Production: app + its own Postgres container, on the production host (deploy/aws/host.yml), which it
+# shares with the frontend. The app listens on localhost only; the host's nginx routes to it
+# (deploy/nginx.conf.template, installed by remote-deploy.sh). The database is backed up to the
+# environment's bucket before every deploy and nightly (deploy/backup-db.sh).
 # Copied to /opt/pri-backend by the deploy-production workflow, next to a rendered .env.
 services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pri_production_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   web:
     image: ${IMAGE}
     restart: unless-stopped
     env_file: .env
     ports:
       - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pri_production_pg:

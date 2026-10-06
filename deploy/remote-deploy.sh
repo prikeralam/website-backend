@@ -34,6 +34,12 @@ docker compose pull web || rollback
 
 if docker compose config --services | grep -qx db; then
   docker compose up -d --wait db || rollback
+  # Restore point before any migration runs (CONTRIBUTING.md section 7).
+  bash /opt/pri-backend/backup-db.sh predeploy || rollback
+  # Nightly at 02:47 IST; replaces any earlier entry for this job.
+  { crontab -l 2>/dev/null | grep -v "pri-backup-db" || true
+    echo "17 21 * * * /bin/bash /opt/pri-backend/backup-db.sh nightly >> /opt/pri-backend/backup.log 2>&1 # pri-backup-db"
+  } | crontab -
 fi
 
 docker compose run --rm --no-deps web python manage.py migrate --plan || rollback

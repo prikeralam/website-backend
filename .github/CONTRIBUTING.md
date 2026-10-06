@@ -104,8 +104,8 @@ docs(prd): add module C open decisions
 | Env | Branch | Postgres | S3 bucket |
 |---|---|---|---|
 | Dev | local / `dev` | local Docker Compose (`docker-compose.yml`), seeded/fake data | `pri-dev` |
-| Staging | `staging` | Postgres container on the staging EC2 host, prod-like schema, sanitized data | `pri-staging` |
-| Production | `main` | RDS instance, real data, snapshot before every deploy | `pri-prod` |
+| Staging | `staging` | Postgres container on the staging host, prod-like schema, sanitized data | `pri-staging-<account>` |
+| Production | `main` | Postgres container on the production host, real data, backed up to S3 before every deploy and nightly | `pri-production-<account>` |
 
 Never point staging at the prod database or prod bucket. A staging bug
 that deletes rows or overwrites files becomes a prod incident. The deploy
@@ -120,7 +120,7 @@ start deployed with `DEBUG=True` or without a bucket.
 | `ci.yml` | every PR, push to `dev`, and called by both deploy workflows | `lint` (ruff), `test` (`manage.py check`, `makemigrations --check`, `migrate`, `test` on Postgres 16), `docker-build` (builds the image, boots it against Postgres with a real-looking `ALLOWED_HOSTS`, requests `/healthz/`, and waits for Docker to report it healthy) |
 | `pr-guard.yml` | PRs into `dev`, `staging`, `main` | `branch-flow` fails a PR whose source/target pair is not an allowed promotion path (section 1) |
 | `deploy-staging.yml` | push to `staging` | CI, then builds and pushes the image to GHCR, then deploys it to the staging EC2 host over SSH (`staging` Environment) |
-| `deploy-production.yml` | push to `main` | CI, then image, then manual approval, then RDS snapshot, then SSH deploy, then git tag and GitHub Release (`production` Environment) |
+| `deploy-production.yml` | push to `main` | CI, then image, then SSH deploy (the host backs up its database before migrating), then git tag and GitHub Release (`production` Environment) |
 | `hotfix-backport.yml` | push to `main` from a `fix/*` PR | opens backport PRs into `staging` and `dev` |
 
 Images are tagged `sha-<commit>` and `tree-<git tree hash>`. A merge of
@@ -132,9 +132,9 @@ or any tree never seen on staging is built fresh.
 
 1. Merge work branches into `dev` (squash) once CI is green.
 2. Open `dev` -> `staging`, merge commit. The staging deploy runs; smoke test it.
-3. Open `staging` -> `main`, merge commit. The production run pauses at the
-   `production` Environment for approval. Approve it: the RDS snapshot is
-   taken, the image is deployed, and the release is tagged (section 6).
+3. Open `staging` -> `main`, merge commit. Merging is the manual gate (GitHub Free
+   can't require reviewers on a private repo's Environment): the database is
+   backed up, the image is deployed, and the release is tagged (section 6).
 4. Hotfix: `fix/*` from `main` -> `main`, then merge the two backport PRs.
 
 ### Secrets and variables
@@ -145,8 +145,6 @@ Set per GitHub Environment, not at repo level, so staging and prod stay isolated
 | Where | Name | Kind |
 |---|---|---|
 | `staging` and `production` | `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`, `EC2_SSH_KNOWN_HOSTS`, `APP_ENV_FILE` | secrets |
-| `production` only | `AWS_ROLE_ARN` | secret |
-| `production` only | `AWS_REGION`, `RDS_INSTANCE_ID` | variables |
 | repository (optional) | `BACKPORT_TOKEN` | secret; without it backport PRs don't trigger CI, close and reopen each one |
 
 `APP_ENV_FILE` is the full runtime `.env` (see `.env.example`). Setting up the
@@ -184,8 +182,9 @@ tag numbers in sync across the two repos.
 - Migration files ship in the *same* PR as the model change that produced them.
 - Run `python manage.py migrate --plan` against staging before running
   against prod.
-- Prod Postgres is snapshotted automatically before every production deploy
-  (RDS snapshot in `deploy-production.yml`), so any release that migrates has a restore point.
+- Postgres is dumped to the environment's bucket before every deploy and nightly
+  (`deploy/backup-db.sh`, run by `remote-deploy.sh`), so any release that migrates has a restore point.
+  Restoring is in `docs/deploy/aws-provisioning.md`.
 - Irreversible migrations (column drops, type changes) are two PRs:
   1. Additive/compatible change, deploy, backfill.
   2. Drop the old column, only after confirming nothing references it.
