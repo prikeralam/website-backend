@@ -6,6 +6,7 @@ Cross-cutting conventions for the v1 API. Module-specific endpoint tables live i
 - [module-a-content.md](module-a-content.md) — CMS content types
 - [module-b-publications.md](module-b-publications.md) — Publication repository
 - [module-c-data-repository.md](module-c-data-repository.md) — Datasets & dashboards
+- [module-g-contact.md](module-g-contact.md) — Contact form and staff inbox
 
 ## Start here: frontend integration
 
