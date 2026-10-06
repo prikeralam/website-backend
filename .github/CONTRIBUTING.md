@@ -117,7 +117,7 @@ start deployed with `DEBUG=True` or without a bucket.
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| `ci.yml` | every PR, push to `dev`, and called by both deploy workflows | `lint` (ruff), `test` (`manage.py check`, `makemigrations --check`, `migrate`, `test` on Postgres 16), `docker-build` (builds the image, boots it against Postgres, requests `/healthz/`) |
+| `ci.yml` | every PR, push to `dev`, and called by both deploy workflows | `lint` (ruff), `test` (`manage.py check`, `makemigrations --check`, `migrate`, `test` on Postgres 16), `docker-build` (builds the image, boots it against Postgres with a real-looking `ALLOWED_HOSTS`, requests `/healthz/`, and waits for Docker to report it healthy) |
 | `pr-guard.yml` | PRs into `dev`, `staging`, `main` | `branch-flow` fails a PR whose source/target pair is not an allowed promotion path (section 1) |
 | `deploy-staging.yml` | push to `staging` | CI, then builds and pushes the image to GHCR, then deploys it to the staging EC2 host over SSH (`staging` Environment) |
 | `deploy-production.yml` | push to `main` | CI, then image, then manual approval, then RDS snapshot, then SSH deploy, then git tag and GitHub Release (`production` Environment) |
