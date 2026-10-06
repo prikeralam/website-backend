@@ -10,7 +10,9 @@ label=${1:-manual}
 [[ $label =~ ^[a-z]+$ ]] || { echo "bad label" >&2; exit 1; }
 env_value() { grep -E "^$1=" .env | tail -n1 | cut -d= -f2-; }
 
-if ! docker compose config --services | grep -qx db; then
+# Read the list first: `docker compose ... | grep -q` under pipefail can fail when grep exits early.
+services=$(docker compose config --services)
+if ! grep -qx db <<< "$services"; then
   echo "No db service here; nothing to back up."
   exit 0
 fi
