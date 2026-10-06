@@ -45,6 +45,13 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      # Database dumps (deploy/backup-db.sh) are kept for 30 days; uploaded media never expires.
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-database-backups
+            Status: Enabled
+            Prefix: backups/
+            ExpirationInDays: 30
 
   InstanceRole:
     Type: AWS::IAM::Role
@@ -178,32 +185,59 @@ Resources:
           printf '#!/bin/sh\nsystemctl reload nginx\n' > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
           chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
 
-          # pri-nginx-site NAME SERVER_NAME DIR: installs DIR's site template as NAME for SERVER_NAME.
-          # Uses DIR/nginx.conf.template (HTTPS) once a certificate exists, and asks for one first
-          # when the name already resolves to this host; until then DIR/nginx.http.conf.template.
+          # pri-nginx-site NAME SERVER_NAME DIR [ALIAS...]: installs DIR's site templates as NAME for SERVER_NAME.
+          # Uses DIR/nginx.conf.template (HTTPS) once a certificate covers SERVER_NAME and every ALIAS, and
+          # asks for one first when all of those names resolve to this host; until then
+          # DIR/nginx.http.conf.template. ALIAS names (e.g. www) redirect to SERVER_NAME through
+          # DIR/nginx.redirect.conf.template, or DIR/nginx.redirect.http.conf.template before the certificate.
           cat > /usr/local/sbin/pri-nginx-site <<'SCRIPT'
           #!/bin/bash
           set -euo pipefail
           name=$1 server_name=$2 dir=$3
-          [[ $name =~ ^[a-z0-9-]+$ && $server_name =~ ^[a-z0-9.-]+$ ]] || { echo "bad site name" >&2; exit 1; }
+          shift 3
+          aliases=("$@")
+          valid_host() { [[ $1 =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; }
+          [[ $name =~ ^[a-z0-9-]+$ ]] && valid_host "$server_name" || { echo "bad site name" >&2; exit 1; }
+          for alias in "${!aliases[@]}"; do valid_host "$alias" || { echo "bad alias $alias" >&2; exit 1; }; done
+          names=("$server_name" "${!aliases[@]}")
           cert=/etc/letsencrypt/live/$server_name/fullchain.pem
-          if [ ! -f "$cert" ]; then
+
+          covers_all() {
+            [ -f "$cert" ] || return 1
+            local san
+            san=$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null)
+            for n in "${!names[@]}"; do grep -q "DNS:$n\b" <<< "$san" || return 1; done
+          }
+
+          if ! covers_all; then
             token=$(curl -fsS -X PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 60" http://169.254.169.254/latest/api/token)
             my_ip=$(curl -fsS -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/public-ipv4)
-            if getent ahostsv4 "$server_name" | awk '{print $1}' | grep -qx "$my_ip"; then
-              certbot certonly --webroot -w /var/www/certbot --non-interactive --agree-tos \
-                --register-unsafely-without-email -d "$server_name" || echo "certbot failed; staying on HTTP" >&2
-            else
-              echo "$server_name does not resolve to $my_ip yet; serving HTTP only" >&2
+            ready=1
+            for n in "${!names[@]}"; do
+              getent ahostsv4 "$n" | awk '{print $1}' | grep -qx "$my_ip" || { echo "$n does not resolve to $my_ip yet" >&2; ready=0; }
+            done
+            if [ "$ready" = 1 ]; then
+              domains=()
+              for n in "${!names[@]}"; do domains+=(-d "$n"); done
+              certbot certonly --webroot -w /var/www/certbot --non-interactive --agree-tos --expand \
+                --register-unsafely-without-email --cert-name "$server_name" "${!domains[@]}" \
+                || echo "certbot failed; keeping the current configuration" >&2
             fi
           fi
-          template=$dir/nginx.http.conf.template
-          [ -f "$cert" ] && template=$dir/nginx.conf.template
-          SERVER_NAME=$server_name envsubst '${!SERVER_NAME}' < "$template" > "/etc/nginx/conf.d/$name.conf.new"
+
+          https=0
+          covers_all && https=1
+          render() { SERVER_NAME=$server_name SERVER_ALIASES="${!aliases[*]}" envsubst '${!SERVER_NAME} ${!SERVER_ALIASES}' < "$1"; }
+          {
+            if [ "$https" = 1 ]; then render "$dir/nginx.conf.template"; else render "$dir/nginx.http.conf.template"; fi
+            if [ "${!#aliases[@]}" -gt 0 ]; then
+              if [ "$https" = 1 ]; then render "$dir/nginx.redirect.conf.template"; else render "$dir/nginx.redirect.http.conf.template"; fi
+            fi
+          } > "/etc/nginx/conf.d/$name.conf.new"
           mv "/etc/nginx/conf.d/$name.conf.new" "/etc/nginx/conf.d/$name.conf"
           nginx -t
           systemctl reload nginx
-          echo "nginx site $name: $server_name ($([ -f "$cert" ] && echo https || echo http only))"
+          echo "nginx site $name: ${!names[*]} ($([ "$https" = 1 ] && echo https || echo http only))"
           SCRIPT
           # The deploy scripts run it with sudo (the ubuntu user has passwordless sudo on Ubuntu's AMIs).
           chmod 755 /usr/local/sbin/pri-nginx-site
