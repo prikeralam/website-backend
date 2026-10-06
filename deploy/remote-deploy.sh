@@ -32,7 +32,9 @@ rollback() {
 
 docker compose pull web || rollback
 
-if docker compose config --services | grep -qx db; then
+# Read the list first: `docker compose ... | grep -q` under pipefail can fail when grep exits early.
+services=$(docker compose config --services) || rollback
+if grep -qx db <<< "$services"; then
   docker compose up -d --wait db || rollback
   # Restore point before any migration runs (CONTRIBUTING.md section 7).
   bash /opt/pri-backend/backup-db.sh predeploy || rollback

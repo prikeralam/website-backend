@@ -214,7 +214,8 @@ Resources:
             my_ip=$(curl -fsS -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/public-ipv4)
             ready=1
             for n in "${!names[@]}"; do
-              getent ahostsv4 "$n" | awk '{print $1}' | grep -qx "$my_ip" || { echo "$n does not resolve to $my_ip yet" >&2; ready=0; }
+              addresses=$(getent ahostsv4 "$n" | awk '{print $1}' || true)
+              grep -qx "$my_ip" <<< "$addresses" || { echo "$n does not resolve to $my_ip yet" >&2; ready=0; }
             done
             if [ "$ready" = 1 ]; then
               domains=()
