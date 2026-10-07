@@ -1093,6 +1093,11 @@ paths:
         validates the target status, applies role-gated permission checks,
         updates the object, and writes an AuditLog row.
       parameters:
+      - in: query
+        name: format
+        schema:
+          type: string
+        description: A format from `files`; the main file when omitted.
       - in: path
         name: slug
         schema:
@@ -1110,6 +1115,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/Dataset'
           description: ''
+  /api/v1/datasets/{slug}/files/:
+    post:
+      operationId: v1_datasets_files_create
+      description: Add the same data in another format. Same permission as editing
+        the dataset.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module C — Data Repository
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DatasetFile'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetFile'
+          description: ''
+  /api/v1/datasets/{slug}/files/{file_id}/:
+    delete:
+      operationId: v1_datasets_files_destroy
+      description: Remove one extra format; its stored file is deleted too.
+      parameters:
+      - in: path
+        name: file_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module C — Data Repository
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/datasets/{slug}/preview/map/:
     get:
       operationId: v1_datasets_preview_map_retrieve
@@ -4116,6 +4172,15 @@ components:
           format: uri
         format:
           $ref: '#/components/schemas/DatasetFormatEnum'
+        files:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+          description: 'Every downloadable file: the main one first, then other formats
+            of the same data. Omitted, like `file`, for callers who may not download
+            the dataset.'
         sub_theme:
           type: integer
         geography:
@@ -4152,6 +4217,10 @@ components:
           nullable: true
         columns:
           readOnly: true
+        file_size:
+          type: integer
+          readOnly: true
+          nullable: true
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
@@ -4182,6 +4251,8 @@ components:
       - created_at
       - created_by
       - file
+      - file_size
+      - files
       - format
       - id
       - published_at
@@ -4192,18 +4263,49 @@ components:
       - sub_theme
       - title
       - updated_at
+    DatasetFile:
+      type: object
+      description: An extra format of a dataset, as uploaded by staff. The dataset
+        comes from the URL.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        format:
+          $ref: '#/components/schemas/DatasetFormatEnum'
+        file:
+          type: string
+          format: uri
+        size:
+          type: integer
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - file
+      - format
+      - id
+      - size
     DatasetFormatEnum:
       enum:
       - csv
       - parquet
       - zip
       - geojson
+      - json
+      - xlsx
       type: string
       description: |-
         * `csv` - CSV
         * `parquet` - Parquet
         * `zip` - ZIP
         * `geojson` - GeoJSON
+        * `json` - JSON
+        * `xlsx` - Excel
     DatasetVisibilityEnum:
       enum:
       - public
@@ -5068,6 +5170,15 @@ components:
           format: uri
         format:
           $ref: '#/components/schemas/DatasetFormatEnum'
+        files:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+          description: 'Every downloadable file: the main one first, then other formats
+            of the same data. Omitted, like `file`, for callers who may not download
+            the dataset.'
         sub_theme:
           type: integer
         geography:
@@ -5104,6 +5215,10 @@ components:
           nullable: true
         columns:
           readOnly: true
+        file_size:
+          type: integer
+          readOnly: true
+          nullable: true
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'

@@ -1,7 +1,7 @@
 import django_filters
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.generics import ListAPIView
@@ -15,14 +15,15 @@ from apps.workflow.permissions import STAFF_ROLES, CanSubmitDraft
 from apps.workflow.views import WorkflowViewSetMixin
 
 from .geo import GeoJSONError, GeoJSONTooLarge, load_geojson
-from .models import AccessRequest, Collection, Dashboard, Dataset
-from .permissions import can_download, visible_datasets_for
+from .models import AccessRequest, Collection, Dashboard, Dataset, DatasetFile
+from .permissions import can_download, can_edit_dataset, visible_datasets_for
 from .previews import PreviewError, UnsupportedFormat, table_page
 from .serializers import (
     AccessRequestReviewSerializer,
     AccessRequestSerializer,
     CollectionSerializer,
     DashboardSerializer,
+    DatasetFileSerializer,
     DatasetSerializer,
 )
 
@@ -56,7 +57,7 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
     search_fields = ["title", "description"]
 
     def get_queryset(self):
-        return visible_datasets_for(self.request.user, super().get_queryset())
+        return visible_datasets_for(self.request.user, super().get_queryset()).prefetch_related("extra_files")
 
     def filter_queryset(self, queryset):
         # DjangoFilterBackend/SearchFilter apply to the list action only — see the matching
@@ -66,6 +67,9 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
         return super().filter_queryset(queryset)
 
     def get_permissions(self):
+        if self.action in ("add_file", "remove_file"):
+            # Who may change the files is decided per dataset by can_edit_dataset (see _editable_dataset).
+            return [IsAuthenticated()]
         if self.action == "request_access":
             # Any authenticated user (including the "public"/Donor-Visitor role) may request
             # access to a gated dataset — PRD C story 8 — not gated to contributor roles like
@@ -111,12 +115,62 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
         except GeoJSONError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
+    @extend_schema(
+        parameters=[OpenApiParameter("format", str, description="A format from `files`; the main file when omitted.")]
+    )
     @action(detail=True, methods=["get"])
     def download(self, request, slug=None):
         dataset = self.get_object()
         if not can_download(request.user, dataset):
             return Response({"detail": "You do not have access to download this dataset."}, status=403)
-        return Response({"file": request.build_absolute_uri(dataset.file.url)})
+        wanted = request.query_params.get("format")
+        if not wanted or wanted == dataset.format:
+            return Response({"file": request.build_absolute_uri(dataset.file.url)})
+        extra = dataset.extra_files.filter(format=wanted).first()
+        if extra is None:
+            return Response({"detail": f"This dataset has no '{wanted}' file."}, status=404)
+        return Response({"file": request.build_absolute_uri(extra.file.url)})
+
+    def _editable_dataset(self, request):
+        dataset = self.get_object()
+        if not can_edit_dataset(request.user, dataset):
+            self.permission_denied(request, message="You can't change this dataset's files.")
+        return dataset
+
+    @extend_schema(request={"multipart/form-data": DatasetFileSerializer}, responses={201: DatasetFileSerializer})
+    @action(detail=True, methods=["post"], url_path="files")
+    def add_file(self, request, slug=None):
+        """Add the same data in another format. Same permission as editing the dataset."""
+        dataset = self._editable_dataset(request)
+        serializer = DatasetFileSerializer(data=request.data, context={"dataset": dataset, "request": request})
+        serializer.is_valid(raise_exception=True)
+        extra = serializer.save(dataset=dataset)
+        AuditLog.objects.create(
+            actor=request.user,
+            module="datarepo",
+            action="dataset_file_added",
+            target=f"dataset:{dataset.pk}",
+            metadata={"format": extra.format, "file_id": extra.pk},
+        )
+        return Response(DatasetFileSerializer(extra).data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(request=None, responses={204: None})
+    @action(detail=True, methods=["delete"], url_path=r"files/(?P<file_id>\d+)")
+    def remove_file(self, request, slug=None, file_id=None):
+        """Remove one extra format; its stored file is deleted too."""
+        dataset = self._editable_dataset(request)
+        extra = DatasetFile.objects.filter(dataset=dataset, pk=file_id).first()
+        if extra is None:
+            return Response({"detail": "No such file on this dataset."}, status=404)
+        AuditLog.objects.create(
+            actor=request.user,
+            module="datarepo",
+            action="dataset_file_removed",
+            target=f"dataset:{dataset.pk}",
+            metadata={"format": extra.format, "file_id": extra.pk},
+        )
+        extra.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"], url_path="request-access")
     def request_access(self, request, slug=None):

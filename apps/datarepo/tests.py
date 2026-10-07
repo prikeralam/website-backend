@@ -1,11 +1,14 @@
 import io
 import json
+import os
+import tempfile
 import zipfile
 from unittest import mock
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from apps.taxonomy.models import Theme
@@ -152,9 +155,7 @@ class DatasetTablePreviewTests(APITestCase):
     def setUp(self):
         from django.contrib.auth import get_user_model
 
-        self.user = get_user_model().objects.create_user(
-            username="researcher3", password="pw12345", role="researcher"
-        )
+        self.user = get_user_model().objects.create_user(username="researcher3", password="pw12345", role="researcher")
         migration_theme = Theme.objects.get(slug="migration")
         sub_theme = Theme.objects.create(slug="internal-migration", name="Internal Migration", parent=migration_theme)
         self.csv_ds = Dataset.objects.create(
@@ -254,7 +255,6 @@ class DatasetTablePreviewTests(APITestCase):
         self.assertEqual(response.status_code, 404)
 
 
-
 class DatasetMapPreviewTests(APITestCase):
     FEATURE_COLLECTION = {
         "type": "FeatureCollection",
@@ -326,9 +326,7 @@ class DatasetSubThemeRequirementTests(APITestCase):
     def setUp(self):
         from django.contrib.auth import get_user_model
 
-        self.user = get_user_model().objects.create_user(
-            username="researcher4", password="pw12345", role="researcher"
-        )
+        self.user = get_user_model().objects.create_user(username="researcher4", password="pw12345", role="researcher")
         self.client.force_authenticate(self.user)
         self.top_level_theme = Theme.objects.get(slug="demography")
         self.sub_theme = Theme.objects.create(
@@ -356,12 +354,22 @@ class DatasetSubThemeRequirementTests(APITestCase):
     def test_theme_filter_returns_datasets_under_any_of_its_subthemes(self):
         other_sub = Theme.objects.create(slug="mortality-rates", name="Mortality Rates", parent=self.top_level_theme)
         Dataset.objects.create(
-            slug="demo-ds-1", title="D1", file=SimpleUploadedFile("d1.csv", b"a\n1\n"),
-            format="csv", sub_theme=self.sub_theme, visibility="public", created_by=self.user,
+            slug="demo-ds-1",
+            title="D1",
+            file=SimpleUploadedFile("d1.csv", b"a\n1\n"),
+            format="csv",
+            sub_theme=self.sub_theme,
+            visibility="public",
+            created_by=self.user,
         )
         Dataset.objects.create(
-            slug="demo-ds-2", title="D2", file=SimpleUploadedFile("d2.csv", b"a\n1\n"),
-            format="csv", sub_theme=other_sub, visibility="public", created_by=self.user,
+            slug="demo-ds-2",
+            title="D2",
+            file=SimpleUploadedFile("d2.csv", b"a\n1\n"),
+            format="csv",
+            sub_theme=other_sub,
+            visibility="public",
+            created_by=self.user,
         )
         response = self.client.get(f"/api/v1/datasets/?theme={self.top_level_theme.pk}")
         slugs = {item["slug"] for item in response.data["results"]}
@@ -474,8 +482,14 @@ class CollectionTests(APITestCase):
 
         def dataset(slug, visibility, status="published"):
             return Dataset.objects.create(
-                slug=slug, title=slug, file=SimpleUploadedFile(f"{slug}.csv", b"a\n1\n"), format="csv",
-                sub_theme=sub, visibility=visibility, status=status, created_by=self.editor,
+                slug=slug,
+                title=slug,
+                file=SimpleUploadedFile(f"{slug}.csv", b"a\n1\n"),
+                format="csv",
+                sub_theme=sub,
+                visibility=visibility,
+                status=status,
+                created_by=self.editor,
             )
 
         dataset("open-ds", "public")
@@ -502,3 +516,124 @@ class CollectionTests(APITestCase):
                 self.client.force_authenticate(user)
                 body = self.client.get("/api/v1/collections/plus-one/").data
                 self.assertEqual(sorted(body["datasets"]), ["gated-ds", "open-ds"])
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class DatasetFormatsTests(APITestCase):
+    """One dataset, several formats of the same data: extra files share the dataset's access rules."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.visitor = User.objects.create_user(username="visitor", password="pw12345", role="public")
+        self.researcher = User.objects.create_user(username="researcher", password="pw12345", role="researcher")
+        self.other = User.objects.create_user(username="other", password="pw12345", role="researcher")
+        self.editor = User.objects.create_user(username="editor", password="pw12345", role="editor")
+        health = Theme.objects.get(slug="health")
+        self.sub = Theme.objects.create(slug="phc", name="PHC", parent=health)
+
+    def dataset(self, slug, visibility="public", status="published", owner=None):
+        return Dataset.objects.create(
+            slug=slug,
+            title=slug,
+            file=SimpleUploadedFile(f"{slug}.csv", b"a,b\n1,2\n"),
+            format="csv",
+            sub_theme=self.sub,
+            visibility=visibility,
+            status=status,
+            created_by=owner or self.editor,
+        )
+
+    def add(self, slug, fmt, user=None, content=b'[{"a": 1}]'):
+        self.client.force_authenticate(user or self.editor)
+        return self.client.post(
+            f"/api/v1/datasets/{slug}/files/",
+            {"format": fmt, "file": SimpleUploadedFile(f"{slug}.{fmt}", content)},
+            format="multipart",
+        )
+
+    def test_files_list_the_main_file_then_other_formats(self):
+        self.dataset("plus-one")
+        self.assertEqual(self.add("plus-one", "json").status_code, 201)
+        self.assertEqual(self.add("plus-one", "parquet", content=b"PAR1").status_code, 201)
+
+        self.client.force_authenticate(None)
+        files = self.client.get("/api/v1/datasets/plus-one/").data["files"]
+        self.assertEqual(
+            [(f["format"], f["label"]) for f in files], [("csv", "CSV"), ("json", "JSON"), ("parquet", "Parquet")]
+        )
+        self.assertEqual(files[0]["size"], 8)
+        self.assertEqual(files[1]["size"], 10)
+        self.assertTrue(all(f["url"].startswith("http") for f in files))
+
+    def test_download_picks_a_format(self):
+        self.dataset("plus-one")
+        self.add("plus-one", "json")
+        self.client.force_authenticate(None)
+        self.assertTrue(self.client.get("/api/v1/datasets/plus-one/download/").data["file"].endswith(".csv"))
+        self.assertTrue(
+            self.client.get("/api/v1/datasets/plus-one/download/?format=json").data["file"].endswith(".json")
+        )
+        self.assertEqual(self.client.get("/api/v1/datasets/plus-one/download/?format=xlsx").status_code, 404)
+
+    def test_other_formats_never_leak_past_the_access_rules(self):
+        self.dataset("gated", visibility="on_request")
+        self.add("gated", "json")
+        for user in (None, self.visitor):
+            with self.subTest(user=user):
+                self.client.force_authenticate(user)
+                body = self.client.get("/api/v1/datasets/gated/").data
+                self.assertNotIn("files", body)
+                self.assertNotIn("file", body)
+                self.assertEqual(self.client.get("/api/v1/datasets/gated/download/?format=json").status_code, 403)
+
+        AccessRequest.objects.create(user=self.visitor, dataset=Dataset.objects.get(slug="gated"), status="approved")
+        self.client.force_authenticate(self.visitor)
+        self.assertEqual(
+            [f["format"] for f in self.client.get("/api/v1/datasets/gated/").data["files"]], ["csv", "json"]
+        )
+
+    def test_one_file_per_format_and_not_the_main_format(self):
+        self.dataset("plus-one")
+        self.assertEqual(self.add("plus-one", "json").status_code, 201)
+        self.assertEqual(self.add("plus-one", "json").status_code, 400)
+        self.assertEqual(self.add("plus-one", "csv").status_code, 400)
+
+    def test_only_people_who_may_edit_the_dataset_change_its_files(self):
+        self.dataset("draft-ds", status="draft", owner=self.researcher)
+        self.assertEqual(self.add("draft-ds", "json", user=self.other).status_code, 404)  # not visible to them at all
+        self.assertEqual(self.add("draft-ds", "json", user=self.researcher).status_code, 201)
+
+        self.dataset("published-ds", owner=self.researcher)
+        self.assertEqual(self.add("published-ds", "json", user=self.researcher).status_code, 403)
+        self.assertEqual(self.add("published-ds", "json", user=self.visitor).status_code, 403)
+        self.client.force_authenticate(None)
+        response = self.client.post("/api/v1/datasets/published-ds/files/", {"format": "json"}, format="multipart")
+        self.assertEqual(response.status_code, 401)
+
+    def test_removing_a_format_deletes_its_file_and_is_audited(self):
+        from apps.accounts.models import AuditLog
+
+        self.dataset("plus-one")
+        file_id = self.add("plus-one", "json").data["id"]
+        stored = Dataset.objects.get(slug="plus-one").extra_files.get().file
+        path = stored.path
+        self.assertTrue(os.path.exists(path))
+
+        self.client.force_authenticate(self.visitor)
+        self.assertEqual(self.client.delete(f"/api/v1/datasets/plus-one/files/{file_id}/").status_code, 403)
+        self.client.force_authenticate(self.editor)
+        self.assertEqual(self.client.delete(f"/api/v1/datasets/plus-one/files/{file_id}/").status_code, 204)
+        self.assertFalse(os.path.exists(path))
+        self.assertEqual(
+            list(AuditLog.objects.filter(module="datarepo").values_list("action", flat=True).order_by("timestamp")),
+            ["dataset_file_added", "dataset_file_removed"],
+        )
+
+    def test_deleting_the_dataset_deletes_its_other_formats(self):
+        self.dataset("plus-one")
+        self.add("plus-one", "json")
+        path = Dataset.objects.get(slug="plus-one").extra_files.get().file.path
+        Dataset.objects.get(slug="plus-one").delete()
+        self.assertFalse(os.path.exists(path))
