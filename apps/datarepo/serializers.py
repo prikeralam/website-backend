@@ -2,13 +2,49 @@ from rest_framework import serializers
 
 from apps.publications.models import Publication
 
-from .models import AccessRequest, Collection, Dashboard, Dataset
+from .models import AccessRequest, Collection, Dashboard, Dataset, DatasetFile
 from .permissions import can_download, visible_datasets_for
 
 WORKFLOW_READ_ONLY_FIELDS = ["status", "created_by", "reviewed_by", "created_at", "updated_at", "published_at"]
 
 
+def _file_entry(request, *, format, file, size, id=None):
+    url = file.url
+    return {
+        "id": id,
+        "format": format,
+        "label": dict(Dataset.FORMAT_CHOICES).get(format, format.upper()),
+        "url": request.build_absolute_uri(url) if request is not None else url,
+        "size": size,
+    }
+
+
+class DatasetFileSerializer(serializers.ModelSerializer):
+    """An extra format of a dataset, as uploaded by staff. The dataset comes from the URL."""
+
+    class Meta:
+        model = DatasetFile
+        fields = ["id", "format", "file", "size", "created_at"]
+        read_only_fields = ["id", "size", "created_at"]
+
+    def validate_format(self, value):
+        dataset = self.context["dataset"]
+        if value == dataset.format:
+            raise serializers.ValidationError("That is already the dataset's main file format.")
+        if dataset.extra_files.filter(format=value).exists():
+            raise serializers.ValidationError("This dataset already has a file in that format; remove it first.")
+        return value
+
+
 class DatasetSerializer(serializers.ModelSerializer):
+    formats = serializers.SerializerMethodField(
+        help_text="Every format the dataset comes in, main first. Always shown, even when `files` is not."
+    )
+    files = serializers.SerializerMethodField(
+        help_text="Every downloadable file: the main one first, then other formats of the same data. "
+        "Omitted, like `file`, for callers who may not download the dataset."
+    )
+
     class Meta:
         model = Dataset
         fields = [
@@ -18,6 +54,8 @@ class DatasetSerializer(serializers.ModelSerializer):
             "description",
             "file",
             "format",
+            "formats",
+            "files",
             "sub_theme",
             "geography",
             "year",
@@ -30,6 +68,7 @@ class DatasetSerializer(serializers.ModelSerializer):
             "row_count",
             "column_count",
             "columns",
+            "file_size",
             "status",
             "created_by",
             "reviewed_by",
@@ -37,7 +76,7 @@ class DatasetSerializer(serializers.ModelSerializer):
             "updated_at",
             "published_at",
         ]
-        read_only_fields = [*WORKFLOW_READ_ONLY_FIELDS, "row_count", "column_count", "columns"]
+        read_only_fields = [*WORKFLOW_READ_ONLY_FIELDS, "row_count", "column_count", "columns", "file_size"]
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -46,7 +85,20 @@ class DatasetSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if request is not None and not can_download(request.user, instance):
             data.pop("file", None)
+            data.pop("files", None)
         return data
+
+    def get_formats(self, instance) -> list[str]:
+        return [instance.format, *(extra.format for extra in instance.extra_files.all())]
+
+    def get_files(self, instance) -> list[dict]:
+        request = self.context.get("request")
+        files = []
+        if instance.file:
+            files.append(_file_entry(request, format=instance.format, file=instance.file, size=instance.file_size))
+        for extra in instance.extra_files.all():
+            files.append(_file_entry(request, id=extra.id, format=extra.format, file=extra.file, size=extra.size))
+        return files
 
     def validate_sub_theme(self, sub_theme):
         if sub_theme.parent_id is None:

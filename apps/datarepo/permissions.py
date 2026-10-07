@@ -7,7 +7,9 @@ and docs/PRDs/C-data-repository-dashboard-integration.md:36-39.
     internal_only  - excluded entirely from any non-staff (non researcher/editor/admin)
                      response — not just download-gated, genuinely invisible.
 """
-from apps.workflow.permissions import STAFF_ROLES
+
+from apps.workflow.models import WorkflowStatus
+from apps.workflow.permissions import CONTRIBUTOR_ROLES, STAFF_ROLES
 
 INTERNAL_USE_ROLES = STAFF_ROLES | {"researcher"}
 
@@ -37,3 +39,12 @@ def can_download(user, dataset):
     if not user.is_authenticated:
         return False
     return dataset.access_requests.filter(user=user, status="approved").exists()
+
+
+def can_edit_dataset(user, dataset):
+    """Who may change a dataset's files: the same rule as editing it (CanSubmitDraft), i.e. its contributor creator
+    while it is a draft, and editors and admins always."""
+    role = _role(user)
+    if role in STAFF_ROLES:
+        return True
+    return role in CONTRIBUTOR_ROLES and dataset.status == WorkflowStatus.DRAFT and dataset.created_by_id == user.id

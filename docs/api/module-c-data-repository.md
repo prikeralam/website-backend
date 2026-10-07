@@ -14,7 +14,9 @@ All endpoints taken from the PRD's own API surface list (`docs/PRDs/C-data-repos
 | `GET /api/v1/datasets/{slug}/` | Public read, visibility-filtered | — | **Built, flagged deviation** — see below |
 | `GET /api/v1/datasets/{slug}/preview/table/?page=` | Public read, visibility-filtered | `page` | **Built** — `csv`; `parquet` (via `pyarrow`, 50 rows per page, non-JSON cell types stringified); `zip` (first `.csv` member). An unreadable file, or a zip with no CSV, returns `422` |
 | `GET /api/v1/datasets/{slug}/preview/map/` | Public read, visibility-filtered | — | **Built** — `geojson` datasets only: the file is parsed and returned as-is for the frontend to render (10 MB cap, `413` above it). A non-`geojson` dataset, or a file that isn't valid GeoJSON, returns `422` |
-| `GET /api/v1/datasets/{slug}/download/` | Public for the `public` tier; signed-in with an approved request for `on_request` | — | **Built** |
+| `GET /api/v1/datasets/{slug}/download/?format=` | Public for the `public` tier; signed-in with an approved request for `on_request` | `format` | **Built** — the main file, or the file in `format` (see "Several formats" below); `404` when the dataset has no file in that format |
+| `POST /api/v1/datasets/{slug}/files/` | Who may edit the dataset: its contributor creator while it's a draft, editors and admins always | — | **Built** — multipart `format`, `file`: adds the same data in another format |
+| `DELETE /api/v1/datasets/{slug}/files/{id}/` | As above | — | **Built** — removes one extra format and deletes its stored file |
 | `POST /api/v1/datasets/{slug}/request-access/` | Authenticated | — | **Built** — creates an `AccessRequest` |
 | `POST /api/v1/datasets/{slug}/transition/` | Auth (role-gated) | — | **Built** — shared `WorkflowViewSetMixin` action, same as A/B |
 | `GET /api/v1/dashboards/?theme=&geography=&year=&type=` | Public read, published only | `theme`, `geography`, `year`, `type` | **Built** — `theme` here is a direct FK (Dashboard wasn't asked to require a sub-theme, unlike Dataset) |
@@ -39,7 +41,7 @@ Mirrors the existing `/transition/` pattern (single-field status update, role-ga
 
 Per PRD Implementation Decisions (`docs/PRDs/C-data-repository-dashboard-integration.md:31-41`), matching ERD tables (`docs/erd/pri_platform_schema.sql:432-496`) and `apps/datarepo/models.py`:
 
-- **`Dataset`** — `slug`, `title`, `description`, `file` (S3 key, see [README.md](README.md#file-storage)), `format` (`csv`/`parquet`/`zip`), `sub_theme` (FK to `taxonomy.Theme`, renamed from the originally-planned `theme` — **must reference an actual sub-theme**, enforced in `DatasetSerializer.validate_sub_theme`; see [README.md](README.md#shared-taxonomy--theme)), `geography`, `year`, `source`, `update_frequency`, `visibility` (`public`/`on_request`/`internal_only`), plus `WorkflowMixin`'s `status`/`created_by`/`reviewed_by`/timestamps.
+- **`Dataset`** — `slug`, `title`, `description`, `file` (S3 key, see [README.md](README.md#file-storage)), `format` (`csv`/`parquet`/`zip`/`geojson`/`json`/`xlsx`), `file_size` (bytes, read-only), `sub_theme` (FK to `taxonomy.Theme`, renamed from the originally-planned `theme` — **must reference an actual sub-theme**, enforced in `DatasetSerializer.validate_sub_theme`; see [README.md](README.md#shared-taxonomy--theme)), `geography`, `year`, `source`, `update_frequency`, `visibility` (`public`/`on_request`/`internal_only`), plus `WorkflowMixin`'s `status`/`created_by`/`reviewed_by`/timestamps.
 - **`Dashboard`** — `slug`, `title`, `description`, `embed_url`, `embed_type` (`datawrapper`/`tableau`/`d3`), `theme` FK (direct, to any `Theme` — **not** rescoped to sub-themes-only, unlike `Dataset`/`Publication`), `geography`, `year`, `type`, linked `Dataset`(s) (M2M), plus `WorkflowMixin` fields.
 - **`AccessRequest`** — `user` FK, `dataset` FK, `status` (`pending`/`approved`/`denied`), `requested_at`, `reviewed_at`, `reviewed_by`. Unique per (`user`, `dataset`).
 
@@ -48,6 +50,23 @@ Per PRD Implementation Decisions (`docs/PRDs/C-data-repository-dashboard-integra
 - `granularity` (e.g. "District, Year"), `time_period` (e.g. "2014-15 to 2024-25") and `citation` (custom citation text; clients build a default one when it's blank): optional and editable.
 - `row_count`, `column_count` and `columns` (the column names): read-only, worked out from the file whenever it changes (`Dataset.save()`): data rows for CSV, the first CSV in a ZIP and Parquet; features and property names for GeoJSON. A file that can't be read leaves them empty (`null`, `null`, `[]`) and never fails the save. Migration `datarepo.0005` fills them for existing datasets; `manage.py refresh_dataset_stats` recomputes them all.
 - `Theme.description`: optional overview for a theme's page.
+
+## Several formats of one dataset
+
+A dataset's main file (`file`, `format`) is the one previews, row counts and columns come from. The same data can also
+be uploaded in other formats (`DatasetFile`: one file per format, never the main format), so a dataset is one record
+with one description, citation and access level, whatever formats it comes in.
+
+- `files` (read-only) lists every downloadable file, the main one first: `[{id, format, label, url, size}]` (`id` is
+  `null` for the main file, which is replaced through the dataset itself). Like `file`, it is left out entirely for
+  callers who may not download the dataset, so an `on_request` or `internal_only` dataset's formats never leak.
+- `formats` (read-only) lists the format codes, main first, and is always shown, so visitors can see what an
+  `on_request` dataset comes in before asking for it.
+- Formats: `csv`, `parquet`, `zip`, `geojson`, `json`, `xlsx`. Previews read only `csv`, `parquet`, `zip` (table) and
+  `geojson` (map), so a dataset whose main file is `json` or `xlsx` has no table preview.
+- Adding or removing a format writes an audit-log row (`dataset_file_added` / `dataset_file_removed`). Deleting a
+  dataset deletes its extra files from storage too.
+- The system doesn't check that the formats hold the same data; the counts shown are the main file's.
 
 ## Collections
 
