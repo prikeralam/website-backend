@@ -207,6 +207,7 @@ SPECTACULAR_SETTINGS = {
     "ENUM_NAME_OVERRIDES": {
         "WorkflowStatusEnum": "apps.workflow.models.WorkflowStatus.choices",
         "AccessRequestStatusEnum": "apps.datarepo.models.AccessRequest.STATUS_CHOICES",
+        "DatasetFormatEnum": "apps.datarepo.models.FORMAT_CHOICES",
     },
     "SERVE_INCLUDE_SCHEMA": False,
     # Explicit order (Swagger UI otherwise sorts tags alphabetically); mirrors docs/api/*.md.
