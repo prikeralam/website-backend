@@ -37,6 +37,9 @@ class DatasetFileSerializer(serializers.ModelSerializer):
 
 
 class DatasetSerializer(serializers.ModelSerializer):
+    formats = serializers.SerializerMethodField(
+        help_text="Every format the dataset comes in, main first. Always shown, even when `files` is not."
+    )
     files = serializers.SerializerMethodField(
         help_text="Every downloadable file: the main one first, then other formats of the same data. "
         "Omitted, like `file`, for callers who may not download the dataset."
@@ -51,6 +54,7 @@ class DatasetSerializer(serializers.ModelSerializer):
             "description",
             "file",
             "format",
+            "formats",
             "files",
             "sub_theme",
             "geography",
@@ -83,6 +87,9 @@ class DatasetSerializer(serializers.ModelSerializer):
             data.pop("file", None)
             data.pop("files", None)
         return data
+
+    def get_formats(self, instance) -> list[str]:
+        return [instance.format, *(extra.format for extra in instance.extra_files.all())]
 
     def get_files(self, instance) -> list[dict]:
         request = self.context.get("request")

@@ -60,6 +60,8 @@ with one description, citation and access level, whatever formats it comes in.
 - `files` (read-only) lists every downloadable file, the main one first: `[{id, format, label, url, size}]` (`id` is
   `null` for the main file, which is replaced through the dataset itself). Like `file`, it is left out entirely for
   callers who may not download the dataset, so an `on_request` or `internal_only` dataset's formats never leak.
+- `formats` (read-only) lists the format codes, main first, and is always shown, so visitors can see what an
+  `on_request` dataset comes in before asking for it.
 - Formats: `csv`, `parquet`, `zip`, `geojson`, `json`, `xlsx`. Previews read only `csv`, `parquet`, `zip` (table) and
   `geojson` (map), so a dataset whose main file is `json` or `xlsx` has no table preview.
 - Adding or removing a format writes an audit-log row (`dataset_file_added` / `dataset_file_removed`). Deleting a

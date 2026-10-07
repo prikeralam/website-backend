@@ -4172,6 +4172,13 @@ components:
           format: uri
         format:
           $ref: '#/components/schemas/DatasetFormatEnum'
+        formats:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: Every format the dataset comes in, main first. Always shown,
+            even when `files` is not.
         files:
           type: array
           items:
@@ -4254,6 +4261,7 @@ components:
       - file_size
       - files
       - format
+      - formats
       - id
       - published_at
       - reviewed_by
@@ -5170,6 +5178,13 @@ components:
           format: uri
         format:
           $ref: '#/components/schemas/DatasetFormatEnum'
+        formats:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: Every format the dataset comes in, main first. Always shown,
+            even when `files` is not.
         files:
           type: array
           items:

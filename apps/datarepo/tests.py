@@ -586,6 +586,7 @@ class DatasetFormatsTests(APITestCase):
                 body = self.client.get("/api/v1/datasets/gated/").data
                 self.assertNotIn("files", body)
                 self.assertNotIn("file", body)
+                self.assertEqual(body["formats"], ["csv", "json"])
                 self.assertEqual(self.client.get("/api/v1/datasets/gated/download/?format=json").status_code, 403)
 
         AccessRequest.objects.create(user=self.visitor, dataset=Dataset.objects.get(slug="gated"), status="approved")
