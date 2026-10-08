@@ -12,7 +12,7 @@ Refuses to run unless ENVIRONMENT=dev, because it creates accounts with a known 
 import io
 import json
 import zipfile
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pyarrow as pa
@@ -25,8 +25,10 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from apps.accounts.models import Role
+from apps.careers.models import JobOpening
 from apps.content.models import ContentBlock, Document, PersonProfile, Testimonial
 from apps.datarepo.models import AccessRequest, Dashboard, Dataset
+from apps.events.models import Event
 from apps.projects.models import Project
 from apps.publications.models import Publication, PublicationVersion
 from apps.taxonomy.models import Theme
@@ -342,6 +344,7 @@ class Command(BaseCommand):
         self.seed_publications(research_team)
         datasets = self.seed_datasets()
         self.seed_dashboards(datasets)
+        self.seed_careers_and_events()
 
         self.stdout.write(self.style.SUCCESS("Demo data ready."))
         self.stdout.write(f"Log in at POST /api/v1/token/ as demo_<role> with password {options['password']!r}:")
@@ -545,3 +548,31 @@ class Command(BaseCommand):
                 type="overview",
             )
             dashboard.datasets.set([datasets["plus-one-batch-size"]] if theme == "education" else [])
+
+    def seed_careers_and_events(self):
+        # The two real openings (also created by careers/0002 on every database), plus a draft to show the workflow.
+        openings = [("research-associate", "Research Associate"), ("data-analyst", "Data Analyst")]
+        for order, (slug, title) in enumerate(openings, 1):
+            self.upsert(
+                JobOpening, slug, title=title, summary="Rolling: apply any time.", rolling=True, display_order=order
+            )
+        self.upsert(JobOpening, "draft-opening", "draft", title="Draft Opening", summary="Demo row: a draft role.")
+
+        today = self.now.date()
+        day = timedelta(days=1)
+        demo_events = [
+            ("demo-policy-roundtable", "event", "Policy roundtable (demo)", today + 21 * day, None),
+            ("demo-research-launch", "event", "Research launch (demo)", today - 40 * day, None),
+            ("demo-campaign", "campaign", "Data literacy campaign (demo)", today - 10 * day, today + 50 * day),
+        ]
+        for slug, kind, title, start, end in demo_events:
+            self.upsert(
+                Event,
+                slug,
+                kind=kind,
+                title=title,
+                summary="Demo row: invented so the events pages have something to show in development.",
+                start_date=start,
+                end_date=end,
+                location="Malappuram, Kerala",
+            )
