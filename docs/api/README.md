@@ -7,6 +7,8 @@ Cross-cutting conventions for the v1 API. Module-specific endpoint tables live i
 - [module-b-publications.md](module-b-publications.md) — Publication repository
 - [module-c-data-repository.md](module-c-data-repository.md) — Datasets & dashboards
 - [module-g-contact.md](module-g-contact.md) — Contact form and staff inbox
+- [module-d-careers.md](module-d-careers.md) — Job openings and the application form (minimal slice of Module D)
+- [events.md](events.md) — Events & Campaigns
 
 ## Start here: frontend integration
 

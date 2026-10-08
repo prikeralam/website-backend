@@ -11,8 +11,10 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
+from apps.careers.models import JobOpening
 from apps.content.models import ContentBlock, Document, PersonProfile, Testimonial
 from apps.datarepo.models import Dashboard, Dataset
+from apps.events.models import Event
 from apps.projects.models import Project
 from apps.publications.models import Publication
 from apps.taxonomy.models import Theme
@@ -30,6 +32,8 @@ PUBLIC_READ_ENDPOINTS = [
     "/api/v1/dashboards/",
     "/api/v1/themes/",
     "/api/v1/updates/latest/",
+    "/api/v1/jobs/",
+    "/api/v1/events/",
 ]
 
 
@@ -63,7 +67,8 @@ class AnonymousReadTests(PublicReadTestCase):
                 self.assertEqual(self.client.get(url).status_code, 200)
 
     def test_account_and_review_endpoints_stay_closed_to_anonymous_visitors(self):
-        for url in ["/api/v1/users/me/role/", "/api/v1/audit-log/", "/api/v1/access-requests/"]:
+        closed = ["/api/v1/users/me/role/", "/api/v1/audit-log/", "/api/v1/access-requests/", "/api/v1/applications/"]
+        for url in closed:
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 401)
 
@@ -102,6 +107,8 @@ class AnonymousReadTests(PublicReadTestCase):
                 {"title": "t", "file": SimpleUploadedFile("d.pdf", b"%PDF")},
             ),
             (Project, "projects", {"title": "t", "blurb": "b"}),
+            (JobOpening, "jobs", {"title": "t"}),
+            (Event, "events", {"title": "t", "start_date": "2026-11-01"}),
         ]
         for model, route, fields in cases:
             with self.subTest(route=route):

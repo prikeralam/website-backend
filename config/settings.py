@@ -58,6 +58,8 @@ INSTALLED_APPS = [
     "apps.datarepo",
     "apps.impact",
     "apps.contact",
+    "apps.careers",
+    "apps.events",
 ]
 
 MIDDLEWARE = [
@@ -188,6 +190,9 @@ REST_FRAMEWORK = {
         "password_reset": "5/hour",
         "contact": "5/hour",
         "contact_global": env("CONTACT_GLOBAL_RATE", default="200/hour"),
+        # POST /api/v1/apply/: per applicant address, and in total.
+        "application": "3/hour",
+        "application_global": env("APPLICATION_GLOBAL_RATE", default="60/hour"),
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -208,6 +213,9 @@ SPECTACULAR_SETTINGS = {
         "WorkflowStatusEnum": "apps.workflow.models.WorkflowStatus.choices",
         "AccessRequestStatusEnum": "apps.datarepo.models.AccessRequest.STATUS_CHOICES",
         "DatasetFormatEnum": "apps.datarepo.models.FORMAT_CHOICES",
+        "ApplicationKindEnum": "apps.careers.models.APPLICATION_KIND_CHOICES",
+        "ApplicationStatusEnum": "apps.careers.models.APPLICATION_STATUS_CHOICES",
+        "EventKindEnum": "apps.events.models.EVENT_KIND_CHOICES",
     },
     "SERVE_INCLUDE_SCHEMA": False,
     # Explicit order (Swagger UI otherwise sorts tags alphabetically); mirrors docs/api/*.md.
@@ -218,6 +226,8 @@ SPECTACULAR_SETTINGS = {
         {"name": "Projects (Homepage)"},
         {"name": "Module B — Publications"},
         {"name": "Module C — Data Repository"},
+        {"name": "Module D — Careers & Applications"},
+        {"name": "Events & Campaigns"},
     ],
 }
 

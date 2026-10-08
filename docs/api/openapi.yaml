@@ -81,6 +81,156 @@ paths:
               schema:
                 $ref: '#/components/schemas/AccessRequest'
           description: ''
+  /api/v1/applications/:
+    get:
+      operationId: v1_applications_list
+      description: Staff read applications, open their files and mark them reviewed
+        (or new again).
+      parameters:
+      - in: query
+        name: kind
+        schema:
+          type: string
+          enum:
+          - fellowship
+          - internship
+          - job
+        description: |-
+          * `fellowship` - Fellowship
+          * `internship` - Internship
+          * `job` - Job
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - new
+          - reviewed
+        description: |-
+          * `new` - New
+          * `reviewed` - Reviewed
+      tags:
+      - Module D — Careers & Applications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedApplicationList'
+          description: ''
+  /api/v1/applications/{id}/:
+    get:
+      operationId: v1_applications_retrieve
+      description: Staff read applications, open their files and mark them reviewed
+        (or new again).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this application.
+        required: true
+      tags:
+      - Module D — Careers & Applications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+          description: ''
+    patch:
+      operationId: v1_applications_partial_update
+      description: Staff read applications, open their files and mark them reviewed
+        (or new again).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this application.
+        required: true
+      tags:
+      - Module D — Careers & Applications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedApplication'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedApplication'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedApplication'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+          description: ''
+  /api/v1/applications/{id}/files/{document}/:
+    get:
+      operationId: v1_applications_files_retrieve
+      description: A link to the applicant's CV or SOP. On S3 it is presigned and
+        expires; never stored on the page.
+      parameters:
+      - in: path
+        name: document
+        schema:
+          type: string
+          enum:
+          - cv
+          - sop
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this application.
+        required: true
+      tags:
+      - Module D — Careers & Applications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: '{"file": "<short-lived URL>"}'
+  /api/v1/apply/:
+    post:
+      operationId: v1_apply_create
+      description: The public application form (fellowships, internships and job openings),
+        with a CV and an SOP.
+      tags:
+      - Module D — Careers & Applications
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ApplicationSubmission'
+        required: true
+      security:
+      - {}
+      responses:
+        '201':
+          description: Received.
+        '400':
+          description: Invalid fields.
+        '429':
+          description: Too many applications.
   /api/v1/audit-log/:
     get:
       operationId: v1_audit_log_list
@@ -1515,6 +1665,438 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Document'
+          description: ''
+  /api/v1/events/:
+    get:
+      operationId: v1_events_list
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: query
+        name: kind
+        schema:
+          type: string
+          enum:
+          - campaign
+          - event
+        description: |-
+          * `event` - Event
+          * `campaign` - Campaign
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - Events & Campaigns
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedEventList'
+          description: ''
+    post:
+      operationId: v1_events_create
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      tags:
+      - Events & Campaigns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Event'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Event'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Event'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+          description: ''
+  /api/v1/events/{slug}/:
+    get:
+      operationId: v1_events_retrieve
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Events & Campaigns
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+          description: ''
+    put:
+      operationId: v1_events_update
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Events & Campaigns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Event'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Event'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Event'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+          description: ''
+    patch:
+      operationId: v1_events_partial_update
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Events & Campaigns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedEvent'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedEvent'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedEvent'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+          description: ''
+    delete:
+      operationId: v1_events_destroy
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Events & Campaigns
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/events/{slug}/transition/:
+    post:
+      operationId: v1_events_transition_create
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Events & Campaigns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Event'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Event'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Event'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+          description: ''
+  /api/v1/jobs/:
+    get:
+      operationId: v1_jobs_list
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - Module D — Careers & Applications
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedJobOpeningList'
+          description: ''
+    post:
+      operationId: v1_jobs_create
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      tags:
+      - Module D — Careers & Applications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobOpening'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/JobOpening'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/JobOpening'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOpening'
+          description: ''
+  /api/v1/jobs/{slug}/:
+    get:
+      operationId: v1_jobs_retrieve
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module D — Careers & Applications
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOpening'
+          description: ''
+    put:
+      operationId: v1_jobs_update
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module D — Careers & Applications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobOpening'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/JobOpening'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/JobOpening'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOpening'
+          description: ''
+    patch:
+      operationId: v1_jobs_partial_update
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module D — Careers & Applications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedJobOpening'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedJobOpening'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedJobOpening'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOpening'
+          description: ''
+    delete:
+      operationId: v1_jobs_destroy
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module D — Careers & Applications
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/jobs/{slug}/transition/:
+    post:
+      operationId: v1_jobs_transition_create
+      description: |-
+        Mixin for any content-type ViewSet built on WorkflowMixin models.
+        Provides a shared `POST /<resource>/<pk>/transition/` action that
+        validates the target status, applies role-gated permission checks,
+        updates the object, and writes an AuditLog row.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module D — Careers & Applications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobOpening'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/JobOpening'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/JobOpening'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOpening'
           description: ''
   /api/v1/mentions/:
     get:
@@ -3853,6 +4435,109 @@ components:
         * `pending` - Pending
         * `approved` - Approved
         * `denied` - Denied
+    Application:
+      type: object
+      description: An application as staff see it. Only `status` can be changed; the
+        files are fetched through `files/`.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ApplicationKindEnum'
+          readOnly: true
+        job_slug:
+          type: string
+          readOnly: true
+        job_title:
+          type: string
+          readOnly: true
+        full_name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/ApplicationStatusEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        handled_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        handled_by:
+          type: integer
+          readOnly: true
+          nullable: true
+      required:
+      - created_at
+      - email
+      - full_name
+      - handled_at
+      - handled_by
+      - id
+      - job_slug
+      - job_title
+      - kind
+    ApplicationKindEnum:
+      enum:
+      - fellowship
+      - internship
+      - job
+      type: string
+      description: |-
+        * `fellowship` - Fellowship
+        * `internship` - Internship
+        * `job` - Job
+    ApplicationStatusEnum:
+      enum:
+      - new
+      - reviewed
+      type: string
+      description: |-
+        * `new` - New
+        * `reviewed` - Reviewed
+    ApplicationSubmission:
+      type: object
+      description: 'What an applicant sends. `website` is a honeypot: the form hides
+        it, so only bots fill it in.'
+      properties:
+        kind:
+          $ref: '#/components/schemas/ApplicationKindEnum'
+        job:
+          type: string
+          nullable: true
+        full_name:
+          type: string
+          maxLength: 120
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        cv:
+          type: string
+          format: uri
+          pattern: (?:pdf|doc|docx)$
+        sop:
+          type: string
+          format: uri
+          pattern: (?:pdf|doc|docx)$
+        website:
+          type: string
+          writeOnly: true
+          maxLength: 200
+      required:
+      - cv
+      - email
+      - full_name
+      - kind
+      - sop
     AuditLog:
       type: object
       properties:
@@ -4389,6 +5074,97 @@ components:
         * `datawrapper` - Datawrapper
         * `tableau` - Tableau
         * `d3` - D3.js
+    Event:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        slug:
+          type: string
+          maxLength: 50
+          pattern: ^[-a-zA-Z0-9_]+$
+        kind:
+          $ref: '#/components/schemas/EventKindEnum'
+        title:
+          type: string
+          maxLength: 200
+        summary:
+          type: string
+        body:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        location:
+          type: string
+          maxLength: 200
+        image_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 200
+          - type: string
+            maxLength: 0
+        image:
+          type: string
+          format: uri
+          nullable: true
+          pattern: (?:jpg|jpeg|png|webp)$
+        registration_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 500
+          - type: string
+            maxLength: 0
+        status:
+          allOf:
+          - $ref: '#/components/schemas/WorkflowStatusEnum'
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+        reviewed_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        published_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - created_at
+      - created_by
+      - id
+      - published_at
+      - reviewed_by
+      - slug
+      - start_date
+      - status
+      - title
+      - updated_at
+    EventKindEnum:
+      enum:
+      - event
+      - campaign
+      type: string
+      description: |-
+        * `event` - Event
+        * `campaign` - Campaign
     GroupEnum:
       enum:
       - team
@@ -4409,20 +5185,73 @@ components:
         * `past-fellow` - Past Fellow
         * `author` - Author
         * `partner` - Partner
-    KindEnum:
-      enum:
-      - news
-      - research
-      - report
-      - legislature
-      - other
-      type: string
-      description: |-
-        * `news` - News
-        * `research` - Research paper
-        * `report` - Report
-        * `legislature` - Legislature
-        * `other` - Other
+    JobOpening:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        slug:
+          type: string
+          maxLength: 50
+          pattern: ^[-a-zA-Z0-9_]+$
+        title:
+          type: string
+          maxLength: 200
+        summary:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+          maxLength: 200
+        employment_type:
+          type: string
+          maxLength: 100
+        rolling:
+          type: boolean
+        deadline:
+          type: string
+          format: date
+          nullable: true
+        display_order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        status:
+          allOf:
+          - $ref: '#/components/schemas/WorkflowStatusEnum'
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+        reviewed_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        published_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - created_at
+      - created_by
+      - id
+      - published_at
+      - reviewed_by
+      - slug
+      - status
+      - title
+      - updated_at
     LanguageEnum:
       enum:
       - en
@@ -4472,7 +5301,7 @@ components:
           format: uri
           maxLength: 500
         kind:
-          $ref: '#/components/schemas/KindEnum'
+          $ref: '#/components/schemas/MentionKindEnum'
         date:
           type: string
           format: date
@@ -4526,6 +5355,20 @@ components:
       - title
       - updated_at
       - url
+    MentionKindEnum:
+      enum:
+      - news
+      - research
+      - report
+      - legislature
+      - other
+      type: string
+      description: |-
+        * `news` - News
+        * `research` - Research paper
+        * `report` - Report
+        * `legislature` - Legislature
+        * `other` - Other
     MyRole:
       type: object
       properties:
@@ -4567,6 +5410,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AccessRequest'
+    PaginatedApplicationList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Application'
     PaginatedAuditLogList:
       type: object
       required:
@@ -4728,6 +5594,52 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Document'
+    PaginatedEventList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+    PaginatedJobOpeningList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobOpening'
     PaginatedMentionList:
       type: object
       required:
@@ -4974,6 +5886,46 @@ components:
       properties:
         status:
           $ref: '#/components/schemas/AccessRequestReviewStatusEnum'
+    PatchedApplication:
+      type: object
+      description: An application as staff see it. Only `status` can be changed; the
+        files are fetched through `files/`.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ApplicationKindEnum'
+          readOnly: true
+        job_slug:
+          type: string
+          readOnly: true
+        job_title:
+          type: string
+          readOnly: true
+        full_name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/ApplicationStatusEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        handled_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        handled_by:
+          type: integer
+          readOnly: true
+          nullable: true
     PatchedCollection:
       type: object
       properties:
@@ -5303,6 +6255,135 @@ components:
           type: string
           format: date-time
           readOnly: true
+    PatchedEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        slug:
+          type: string
+          maxLength: 50
+          pattern: ^[-a-zA-Z0-9_]+$
+        kind:
+          $ref: '#/components/schemas/EventKindEnum'
+        title:
+          type: string
+          maxLength: 200
+        summary:
+          type: string
+        body:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        location:
+          type: string
+          maxLength: 200
+        image_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 200
+          - type: string
+            maxLength: 0
+        image:
+          type: string
+          format: uri
+          nullable: true
+          pattern: (?:jpg|jpeg|png|webp)$
+        registration_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 500
+          - type: string
+            maxLength: 0
+        status:
+          allOf:
+          - $ref: '#/components/schemas/WorkflowStatusEnum'
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+        reviewed_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        published_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+    PatchedJobOpening:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        slug:
+          type: string
+          maxLength: 50
+          pattern: ^[-a-zA-Z0-9_]+$
+        title:
+          type: string
+          maxLength: 200
+        summary:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+          maxLength: 200
+        employment_type:
+          type: string
+          maxLength: 100
+        rolling:
+          type: boolean
+        deadline:
+          type: string
+          format: date
+          nullable: true
+        display_order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        status:
+          allOf:
+          - $ref: '#/components/schemas/WorkflowStatusEnum'
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+        reviewed_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        published_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
     PatchedMention:
       type: object
       properties:
@@ -5324,7 +6405,7 @@ components:
           format: uri
           maxLength: 500
         kind:
-          $ref: '#/components/schemas/KindEnum'
+          $ref: '#/components/schemas/MentionKindEnum'
         date:
           type: string
           format: date
@@ -6427,3 +7508,5 @@ tags:
 - name: Projects (Homepage)
 - name: Module B — Publications
 - name: Module C — Data Repository
+- name: Module D — Careers & Applications
+- name: Events & Campaigns
