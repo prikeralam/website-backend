@@ -36,3 +36,35 @@ class ImageUploadField(serializers.FileField):
         if data is None:
             return (True, "")
         return super().validate_empty_values(data)
+
+
+# Documents people send in (CVs, statements of purpose). Checked by extension, size and the file's first bytes,
+# since a renamed file of another kind would otherwise pass.
+DOCUMENT_EXTENSIONS = ["pdf", "doc", "docx"]
+MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
+_DOCUMENT_SIGNATURES = {
+    "pdf": (b"%PDF",),
+    "doc": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),  # OLE compound file (Word 97-2003)
+    "docx": (b"PK\x03\x04",),  # ZIP container (Office Open XML)
+}
+
+
+def validate_document_size(file):
+    if file.size > MAX_DOCUMENT_BYTES:
+        raise ValidationError("Files must be 5 MB or smaller.")
+
+
+def validate_document_content(file):
+    extension = file.name.rsplit(".", 1)[-1].lower() if "." in file.name else ""
+    signatures = _DOCUMENT_SIGNATURES.get(extension)
+    if not signatures:
+        return
+    position = file.tell() if hasattr(file, "tell") else 0
+    file.seek(0)
+    head = file.read(8)
+    file.seek(position)
+    if not head.startswith(signatures):
+        raise ValidationError(f"This doesn't look like a .{extension} file.")
+
+
+DOCUMENT_VALIDATORS = [FileExtensionValidator(DOCUMENT_EXTENSIONS), validate_document_size, validate_document_content]
