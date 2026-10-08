@@ -19,6 +19,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             "image",
             "cta_label",
             "cta_href",
+            "stage",
             "status",
             "created_by",
             "reviewed_by",

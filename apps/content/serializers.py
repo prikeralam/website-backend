@@ -78,6 +78,8 @@ class PersonProfileSerializer(serializers.ModelSerializer):
             "photo",
             "linkedin_url",
             "email",
+            "website_url",
+            "display_order",
             "status",
             "created_by",
             "reviewed_by",
@@ -94,6 +96,12 @@ class PersonProfileSerializer(serializers.ModelSerializer):
         host = (parts.hostname or "").lower()
         if parts.scheme != "https" or not (host == "linkedin.com" or host.endswith(".linkedin.com")):
             raise serializers.ValidationError("Enter an https:// link to a linkedin.com profile.")
+        return value
+
+    def validate_website_url(self, value):
+        # Partners' cards link straight to it.
+        if value and urlparse(value).scheme != "https":
+            raise serializers.ValidationError("Enter an https:// address.")
         return value
 
     def create(self, validated_data):

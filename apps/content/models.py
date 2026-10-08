@@ -54,6 +54,13 @@ class PersonProfile(WorkflowMixin):
     # Public contact links shown on the people pages; both optional.
     linkedin_url = models.URLField(blank=True)
     email = models.EmailField(blank=True)
+    # The person's or institution's own site; partners link to it.
+    website_url = models.URLField(blank=True)
+    # Staff set the order people appear in on the public pages: lowest first, then oldest first.
+    display_order = models.PositiveIntegerField(default=0, db_index=True)
+
+    class Meta(WorkflowMixin.Meta):
+        ordering = ["display_order", "id"]
 
     def __str__(self):
         return self.name
