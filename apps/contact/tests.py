@@ -15,7 +15,7 @@ User = get_user_model()
 
 def message_data(**extra):
     return {
-        "category": "research",
+        "category": "collaboration",
         "name": "Asha",
         "email": "asha@example.org",
         "message": "I'd like to discuss your Plus One study.",
@@ -32,7 +32,7 @@ class ContactSubmissionTests(APITestCase):
         response = self.client.post("/api/v1/contact/", message_data(), format="json")
         self.assertEqual(response.status_code, 201, response.data)
         stored = ContactMessage.objects.get()
-        self.assertEqual((stored.category, stored.status, stored.email), ("research", "new", "asha@example.org"))
+        self.assertEqual((stored.category, stored.status, stored.email), ("collaboration", "new", "asha@example.org"))
 
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
@@ -87,7 +87,7 @@ class ContactInboxTests(APITestCase):
         self.editor = User.objects.create_user(username="editor", password="pw12345", role="editor")
         self.researcher = User.objects.create_user(username="researcher", password="pw12345", role="researcher")
         self.message = ContactMessage.objects.create(
-            category="media", name="Ravi", email="ravi@example.org", message="Interview request for Friday."
+            category="data_request", name="Ravi", email="ravi@example.org", message="Interview request for Friday."
         )
 
     def test_only_editors_and_admins_can_read_the_inbox(self):
@@ -129,3 +129,23 @@ class ContactInboxTests(APITestCase):
             (self.message.message, self.message.email), ("Interview request for Friday.", "ravi@example.org")
         )
         self.assertEqual(self.client.delete(f"/api/v1/contact-messages/{self.message.pk}/").status_code, 405)
+
+
+class CategoryMigrationTests(APITestCase):
+    def test_moves_old_categories_to_the_new_ones(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        migration = import_module("apps.contact.migrations.0002_contact_categories")
+        rows = {
+            old: ContactMessage.objects.create(category=old, name="A", email="a@example.org", message="Hello there!")
+            for old in ["research", "media", "general"]
+        }
+        migration.forwards(apps, None)
+        for row in rows.values():
+            row.refresh_from_db()
+        self.assertEqual(
+            {old: row.category for old, row in rows.items()},
+            {"research": "collaboration", "media": "general", "general": "general"},
+        )
