@@ -12,7 +12,7 @@ The public contact form, and the inbox where staff read what arrives. This is th
 
 ## Sending a message
 
-`POST /api/v1/contact/` with `category` (`research`, `media`, `general`), `name`, `email` and `message` (10 to 5,000 characters). Answers `201 {"detail": "Received."}`, `400` with field errors, or `429` when throttled.
+`POST /api/v1/contact/` with `category` (`general` "General Enquiry", `collaboration`, `data_request` "Data Request"; until 2026-10-08 it was `research`/`media`/`general`, and migration `0002` moved old rows: research to collaboration, media to general), `name`, `email` and `message` (10 to 5,000 characters). Answers `201 {"detail": "Received."}`, `400` with field errors, or `429` when throttled.
 
 - **Honeypot:** `website` is optional and must stay empty. The frontend hides it from people; a filled one gets the same `201` and nothing is stored or sent.
 - **Throttling:** 5 an hour per sender address (`contact`), and a ceiling on all messages together (`contact_global`, 200 an hour, `CONTACT_GLOBAL_RATE`). Every message arrives from the frontend's server, so the backend can't limit per visitor IP; the frontend does that.

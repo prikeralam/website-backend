@@ -280,3 +280,36 @@ class PersonContactLinkTests(APITestCase):
         response = self.create(email="not-an-email")
         self.assertEqual(response.status_code, 400)
         self.assertIn("email", response.data)
+
+
+class PersonOrderAndWebsiteTests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.editor = make_user(get_user_model(), "editor", "editor1")
+        self.client.force_authenticate(self.editor)
+
+    def create(self, slug, **extra):
+        data = {"slug": slug, "name": slug.title(), "role_title": "Partner institution", "group": "partner", **extra}
+        return self.client.post("/api/v1/people/", data, format="json")
+
+    def test_lists_sort_by_display_order_then_oldest_first(self):
+        for slug, order in [("c", 2), ("a", 0), ("b", 1), ("d", 0)]:
+            self.assertEqual(self.create(slug, display_order=order).status_code, 201)
+        PersonProfile.objects.update(status=WorkflowStatus.PUBLISHED, published_at=timezone.now())
+        self.client.force_authenticate(None)
+        results = self.client.get("/api/v1/people/?group=partner").data["results"]
+        self.assertEqual([p["slug"] for p in results], ["a", "d", "b", "c"])
+
+    def test_display_order_defaults_to_zero(self):
+        self.assertEqual(self.create("a").data["display_order"], 0)
+
+    def test_saves_an_https_website(self):
+        response = self.create("a", website_url="https://safi.ac.in")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["website_url"], "https://safi.ac.in")
+
+    def test_website_must_be_https(self):
+        response = self.create("a", website_url="http://safi.ac.in")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("website_url", response.data)

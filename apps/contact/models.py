@@ -6,9 +6,9 @@ class ContactMessage(models.Model):
     """A message sent through the public contact form (the contact slice of Module G)."""
 
     class Category(models.TextChoices):
-        RESEARCH = "research", "Research"
-        MEDIA = "media", "Media"
-        GENERAL = "general", "General"
+        GENERAL = "general", "General Enquiry"
+        COLLABORATION = "collaboration", "Collaboration"
+        DATA_REQUEST = "data_request", "Data Request"
 
     class Status(models.TextChoices):
         NEW = "new", "New"

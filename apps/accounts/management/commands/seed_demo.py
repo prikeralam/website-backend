@@ -53,7 +53,7 @@ CONTENT_BLOCKS = [
     (
         "hero",
         "Data-driven research. Evidence-based policy.",
-        "Strategy and collaboration that turn rigorous research into real-world policy impact — "
+        "Strategy and collaboration that turn rigorous research into real-world policy impact, "
         "for a more equitable society.",
         "published",
     ),
@@ -375,7 +375,7 @@ class Command(BaseCommand):
             obj.file.save(file[0], ContentFile(file[1]))
         return obj
 
-    def person(self, name, role_title, group, bio=TBS, photo_url="", status="published"):
+    def person(self, name, role_title, group, bio=TBS, photo_url="", status="published", display_order=0):
         return self.upsert(
             PersonProfile,
             slugify(name)[:50].strip("-"),  # SlugField max_length is 50
@@ -385,22 +385,32 @@ class Command(BaseCommand):
             group=group,
             bio=bio,
             photo_url=photo_url,
+            display_order=display_order,
         )
 
     def seed_people(self):
         # The photos are files in the frontend's public/people/ folder, served by this environment's frontend.
         site = settings.FRONTEND_URL
-        for name, title, photo in TEAM:
-            self.person(name, title, "team", photo_url=f"{site}/people/team/{photo}")
-        for name, photo in PATRONS:
-            self.person(name, "Patron", "patron", photo_url=f"{site}/people/patrons/{photo}")
-        for name, title, photo in EXECUTIVE:
-            self.person(name, title, "executive", photo_url=f"{site}/people/executive/{photo}" if photo else "")
-        for number in range(1, 11):
-            self.person(f"Advisory Member {number}", "Advisory Body", "advisory")
-        for name, description, logo in PARTNERS:
+        # Each group is numbered in the order listed above, which is the order the pages show.
+        for order, (name, title, photo) in enumerate(TEAM, 1):
+            self.person(name, title, "team", photo_url=f"{site}/people/team/{photo}", display_order=order)
+        for order, (name, photo) in enumerate(PATRONS, 1):
             self.person(
-                name, "Partner institution", "partner", bio=description, photo_url=f"{site}/people/partners/{logo}"
+                name, "Chief Patron", "patron", photo_url=f"{site}/people/patrons/{photo}", display_order=order
+            )
+        for order, (name, title, photo) in enumerate(EXECUTIVE, 1):
+            photo_url = f"{site}/people/executive/{photo}" if photo else ""
+            self.person(name, title, "executive", photo_url=photo_url, display_order=order)
+        for number in range(1, 11):
+            self.person(f"Advisory Member {number}", "Advisory Body", "advisory", display_order=number)
+        for order, (name, description, logo) in enumerate(PARTNERS, 1):
+            self.person(
+                name,
+                "Partner institution",
+                "partner",
+                bio=description,
+                photo_url=f"{site}/people/partners/{logo}",
+                display_order=order,
             )
         self.person("Draft Profile", "Analyst", "team", bio="Demo row: a draft profile.", status="draft")
         return self.person("PRI Research Team", "Research team", "author", bio="Authors of PRI's data stories.")
