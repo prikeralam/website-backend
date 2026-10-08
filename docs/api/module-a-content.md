@@ -53,6 +53,15 @@ Optional, and public on the people endpoints: the site shows them as icon links 
 - `linkedin_url` must be `https://` on `linkedin.com` or one of its subdomains (400 on the field otherwise), because the public site links to it directly.
 - `email` is a validated address.
 
+## Display order and website: `PersonProfile.display_order`, `PersonProfile.website_url`
+
+- `display_order` (integer, default 0) sets the order on the public people pages and partners. Lists come back sorted by `display_order`, then oldest first, so people left at 0 keep their creation order.
+- `website_url` is optional and must be `https://` (400 on the field otherwise). Partner cards link to it.
+
+## Project stage: `Project.stage`
+
+`ongoing` (default) or `completed`, shown as a tag on project cards. It is separate from the workflow `status`, which says whether the project is published.
+
 ## SEO meta defaulting
 
 PRD line 40: SEO title/description should default to a derived value (e.g. truncated body) if left blank at publish time. `seo_title`/`seo_description` fields already exist on `ContentBlock` (per ERD `content_contentblock`, `docs/erd/pri_platform_schema.sql:112-125`) but the defaulting logic itself isn't implemented — this is serializer/model `save()`-level logic to build, not a new endpoint.
