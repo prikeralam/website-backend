@@ -41,6 +41,12 @@ class PublicationViewSet(WorkflowViewSetMixin, ModelViewSet):
     filterset_class = PublicationFilter
     search_fields = ["title", "abstract"]
 
+    def publish_blocker(self, obj):
+        # Every publication appears as a card on the research hub, which needs a real image.
+        if not (obj.cover or obj.cover_url):
+            return "Add a cover image before publishing. It is shown on the publication's card in the research list."
+        return None
+
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
