@@ -1,5 +1,8 @@
+import tempfile
 from datetime import date
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from apps.taxonomy.models import Theme
@@ -154,3 +157,143 @@ class SubThemeRequirementTests(APITestCase):
         response = self.client.get(f"/api/v1/publications/?theme={self.top_level_theme.pk}")
         slugs = {item["slug"] for item in response.data["results"]}
         self.assertEqual(slugs, {"gov-report-1", "gov-report-2"})
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class StoryHtmlUploadTests(APITestCase):
+    STORY = (
+        '<article id="s"><p>Body</p></article>'
+        '<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>'
+        "<script>console.log(1)</script>"
+    )
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.user = get_user_model().objects.create_user(
+            username="storyteller", password="pw12345", role="researcher"
+        )
+        self.client.force_authenticate(self.user)
+        governance = Theme.objects.get(slug="governance")
+        self.sub_theme = Theme.objects.create(slug="health-capacity", name="Capacity", parent=governance)
+
+    def _upload(self, content, name="story.html"):
+        payload = {
+            "slug": "health-story",
+            "title": "Health story",
+            "abstract": "x",
+            "format": "data_story",
+            "sub_theme": self.sub_theme.pk,
+            "date": "2026-10-08",
+            "story_html": SimpleUploadedFile(
+                name, content if isinstance(content, bytes) else content.encode(), "text/html"
+            ),
+        }
+        return self.client.post("/api/v1/publications/", payload, format="multipart")
+
+    def test_story_with_pinned_cdn_script_is_accepted_and_stored_as_text(self):
+        response = self._upload(self.STORY)
+        self.assertEqual(response.status_code, 201, response.data)
+        stored = Publication.objects.get(slug="health-story").story_html
+        self.assertTrue(stored.name.startswith("stories/") and stored.name.endswith(".txt"))
+        self.assertIn("/stories/", response.data["story_html"])
+        stored.open("rb")
+        self.assertEqual(stored.read().decode(), self.STORY)
+        stored.close()
+
+    def test_jsdelivr_script_is_accepted(self):
+        response = self._upload('<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>')
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_script_from_another_host_is_refused_by_name(self):
+        response = self._upload('<p>x</p><SCRIPT SRC="https://evil.example/x.js"></SCRIPT>')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("https://evil.example/x.js", str(response.data["story_html"]))
+
+    def test_protocol_relative_script_is_refused(self):
+        response = self._upload('<script src="//cdnjs.cloudflare.com/x.js"></script>')
+        self.assertEqual(response.status_code, 400)
+
+    def test_non_html_extension_is_refused(self):
+        response = self._upload("<p>x</p>", name="story.js")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("story_html", response.data)
+
+    def test_non_utf8_file_is_refused(self):
+        response = self._upload(b"<p>\xff\xfe caf\xe9</p>")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("UTF-8", str(response.data["story_html"]))
+
+    def test_oversize_file_is_refused(self):
+        response = self._upload("<p>" + "x" * (5 * 1024 * 1024) + "</p>")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("5 MB", str(response.data["story_html"]))
+
+    def test_story_is_optional_and_can_be_removed(self):
+        self.assertEqual(self._upload(self.STORY).status_code, 201)
+        response = self.client.patch("/api/v1/publications/health-story/", {"story_html": ""}, format="multipart")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(Publication.objects.get(slug="health-story").story_html)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class CoverRequiredToPublishTests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.editor = get_user_model().objects.create_user(
+            username="cover-editor", password="pw12345", role="editor"
+        )
+        self.client.force_authenticate(self.editor)
+        governance = Theme.objects.get(slug="governance")
+        sub_theme = Theme.objects.create(slug="gov-covers", name="Covers", parent=governance)
+        self.publication = Publication.objects.create(
+            slug="needs-cover", title="Needs cover", abstract="x", format="data_story",
+            sub_theme=sub_theme, date="2026-10-09", created_by=self.editor, status="approved",
+        )
+
+    def _link_cover(self):
+        url = "https://images.example.org/c.jpg"
+        self.client.patch("/api/v1/publications/needs-cover/", {"cover_url": url}, format="json")
+
+    def _publish(self):
+        return self.client.post("/api/v1/publications/needs-cover/transition/", {"status": "published"}, format="json")
+
+    def test_publishing_without_a_cover_is_refused_with_a_reason(self):
+        response = self._publish()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cover image", response.data["detail"])
+        self.publication.refresh_from_db()
+        self.assertEqual(self.publication.status, "approved")
+
+    def test_a_cover_link_or_upload_allows_publishing(self):
+        self._link_cover()
+        self.assertEqual(self._publish().status_code, 200)
+
+        other = Publication.objects.create(
+            slug="uploaded-cover", title="Uploaded", abstract="x", format="report",
+            sub_theme=self.publication.sub_theme, date="2026-10-09", created_by=self.editor, status="approved",
+        )
+        png = SimpleUploadedFile("c.png", b"\x89PNG\r\n\x1a\n" + b"0" * 32, "image/png")
+        path = f"/api/v1/publications/{other.slug}/"
+        self.assertEqual(self.client.patch(path, {"cover": png}, format="multipart").status_code, 200)
+        response = self.client.post(f"{path}transition/", {"status": "published"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_other_transitions_do_not_need_a_cover(self):
+        response = self.client.post(
+            "/api/v1/publications/needs-cover/transition/", {"status": "in_review"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_removing_the_only_cover_of_a_published_publication_is_refused(self):
+        self._link_cover()
+        self._publish()
+        response = self.client.patch("/api/v1/publications/needs-cover/", {"cover_url": ""}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cover", response.data)
+
+    def test_published_publication_without_a_cover_can_still_be_edited(self):
+        Publication.objects.filter(pk=self.publication.pk).update(status="published")
+        response = self.client.patch("/api/v1/publications/needs-cover/", {"title": "Renamed"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
