@@ -1,7 +1,10 @@
 """Uploaded images (person photos, project images, publication covers), shared by the content apps."""
 
+from html.parser import HTMLParser
+
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator
+from django.utils.crypto import get_random_string
 from rest_framework import serializers
 
 IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"]
@@ -19,8 +22,10 @@ IMAGE_VALIDATORS = [FileExtensionValidator(IMAGE_EXTENSIONS), validate_image_siz
 class ImageUploadField(serializers.FileField):
     """An optional image upload. Reads as the file's URL (presigned on S3); writing null removes the upload."""
 
+    default_validators_list = IMAGE_VALIDATORS
+
     def __init__(self, **kwargs):
-        super().__init__(required=False, allow_null=True, validators=IMAGE_VALIDATORS, **kwargs)
+        super().__init__(required=False, allow_null=True, validators=self.default_validators_list, **kwargs)
 
     def run_validators(self, value):
         if value:
@@ -68,3 +73,63 @@ def validate_document_content(file):
 
 
 DOCUMENT_VALIDATORS = [FileExtensionValidator(DOCUMENT_EXTENSIONS), validate_document_size, validate_document_content]
+
+
+# Data story bodies: one self-contained HTML file per publication. The frontend shows it in a sandboxed iframe, so
+# these checks are about keeping stories portable (scripts only from the two pinned CDNs), not about isolation.
+STORY_EXTENSIONS = ["html", "htm"]
+MAX_STORY_BYTES = 5 * 1024 * 1024
+STORY_SCRIPT_HOSTS = ("https://cdnjs.cloudflare.com/", "https://cdn.jsdelivr.net/npm/")
+
+
+class _ScriptSources(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.sources = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            src = dict(attrs).get("src")
+            if src is not None:
+                self.sources.append(src.strip())
+
+
+def _read_text(file):
+    position = file.tell() if hasattr(file, "tell") else 0
+    file.seek(0)
+    raw = file.read()
+    file.seek(position)
+    try:
+        return raw.decode("utf-8-sig") if isinstance(raw, bytes) else raw
+    except UnicodeDecodeError:
+        raise ValidationError("Save the story as UTF-8 text.") from None
+
+
+def validate_story_size(file):
+    if file.size > MAX_STORY_BYTES:
+        raise ValidationError("Story files must be 5 MB or smaller.")
+
+
+def validate_story_content(file):
+    parser = _ScriptSources()
+    parser.feed(_read_text(file))
+    refused = [src for src in parser.sources if not src.startswith(STORY_SCRIPT_HOSTS)]
+    if refused:
+        raise ValidationError(
+            f"Scripts may only load from cdnjs.cloudflare.com or cdn.jsdelivr.net/npm. Refused: {', '.join(refused)}"
+        )
+
+
+STORY_VALIDATORS = [FileExtensionValidator(STORY_EXTENSIONS), validate_story_size, validate_story_content]
+
+
+def story_upload_to(instance, filename):
+    # Stored as plain text: the raw file URL then shows the source instead of running the page on the bucket's
+    # origin. The frontend reads it as text either way.
+    return f"stories/{get_random_string(12)}.txt"
+
+
+class StoryUploadField(ImageUploadField):
+    """An optional story upload: same null/empty handling as images, with the story validators."""
+
+    default_validators_list = STORY_VALIDATORS

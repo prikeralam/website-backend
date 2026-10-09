@@ -1,4 +1,5 @@
 from django.utils import timezone
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -24,6 +25,10 @@ class WorkflowViewSetMixin:
             return [IsAuthenticated(), CanTransitionStatus()]
         return super().get_permissions()
 
+    def publish_blocker(self, obj):
+        """Why `obj` can't be published yet, or None. Content types with publishing requirements override this."""
+        return None
+
     @action(detail=True, methods=["post"], url_path="transition")
     def transition(self, request, *args, **kwargs):
         # Imported here (not at module level) to avoid a circular import:
@@ -36,6 +41,10 @@ class WorkflowViewSetMixin:
         serializer.is_valid(raise_exception=True)
         target_status = serializer.validated_data["status"]
         previous_status = obj.status
+        if target_status == WorkflowStatus.PUBLISHED:
+            blocker = self.publish_blocker(obj)
+            if blocker:
+                return Response({"detail": blocker}, status=status.HTTP_400_BAD_REQUEST)
 
         update_fields = ["status", "reviewed_by", "updated_at"]
         obj.status = target_status
