@@ -234,3 +234,66 @@ class StoryHtmlUploadTests(APITestCase):
         response = self.client.patch("/api/v1/publications/health-story/", {"story_html": ""}, format="multipart")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertFalse(Publication.objects.get(slug="health-story").story_html)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class CoverRequiredToPublishTests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.editor = get_user_model().objects.create_user(
+            username="cover-editor", password="pw12345", role="editor"
+        )
+        self.client.force_authenticate(self.editor)
+        governance = Theme.objects.get(slug="governance")
+        sub_theme = Theme.objects.create(slug="gov-covers", name="Covers", parent=governance)
+        self.publication = Publication.objects.create(
+            slug="needs-cover", title="Needs cover", abstract="x", format="data_story",
+            sub_theme=sub_theme, date="2026-10-09", created_by=self.editor, status="approved",
+        )
+
+    def _link_cover(self):
+        url = "https://images.example.org/c.jpg"
+        self.client.patch("/api/v1/publications/needs-cover/", {"cover_url": url}, format="json")
+
+    def _publish(self):
+        return self.client.post("/api/v1/publications/needs-cover/transition/", {"status": "published"}, format="json")
+
+    def test_publishing_without_a_cover_is_refused_with_a_reason(self):
+        response = self._publish()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cover image", response.data["detail"])
+        self.publication.refresh_from_db()
+        self.assertEqual(self.publication.status, "approved")
+
+    def test_a_cover_link_or_upload_allows_publishing(self):
+        self._link_cover()
+        self.assertEqual(self._publish().status_code, 200)
+
+        other = Publication.objects.create(
+            slug="uploaded-cover", title="Uploaded", abstract="x", format="report",
+            sub_theme=self.publication.sub_theme, date="2026-10-09", created_by=self.editor, status="approved",
+        )
+        png = SimpleUploadedFile("c.png", b"\x89PNG\r\n\x1a\n" + b"0" * 32, "image/png")
+        path = f"/api/v1/publications/{other.slug}/"
+        self.assertEqual(self.client.patch(path, {"cover": png}, format="multipart").status_code, 200)
+        response = self.client.post(f"{path}transition/", {"status": "published"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_other_transitions_do_not_need_a_cover(self):
+        response = self.client.post(
+            "/api/v1/publications/needs-cover/transition/", {"status": "in_review"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_removing_the_only_cover_of_a_published_publication_is_refused(self):
+        self._link_cover()
+        self._publish()
+        response = self.client.patch("/api/v1/publications/needs-cover/", {"cover_url": ""}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cover", response.data)
+
+    def test_published_publication_without_a_cover_can_still_be_edited(self):
+        Publication.objects.filter(pk=self.publication.pk).update(status="published")
+        response = self.client.patch("/api/v1/publications/needs-cover/", {"title": "Renamed"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)

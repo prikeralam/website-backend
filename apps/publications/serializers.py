@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.workflow.models import WorkflowStatus
 from apps.workflow.uploads import ImageUploadField, StoryUploadField
 
 from .models import Publication, PublicationVersion
@@ -45,6 +46,20 @@ class PublicationSerializer(serializers.ModelSerializer):
                 f"via POST /themes/{sub_theme.pk}/subthemes/."
             )
         return sub_theme
+
+    def validate(self, attrs):
+        # A published publication must keep a cover (see PublicationViewSet.publish_blocker). Only an edit that
+        # removes the last one is refused, so older publications without a cover can still be edited.
+        instance = self.instance
+        had_cover = instance is not None and (instance.cover or instance.cover_url)
+        if had_cover and instance.status == WorkflowStatus.PUBLISHED:
+            cover = attrs.get("cover", instance.cover)
+            cover_url = attrs.get("cover_url", instance.cover_url)
+            if not (cover or cover_url):
+                raise serializers.ValidationError(
+                    {"cover": "A published publication needs a cover image. Add a new one, or unpublish it first."}
+                )
+        return attrs
 
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user
