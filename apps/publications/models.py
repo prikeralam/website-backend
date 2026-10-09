@@ -3,7 +3,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 from apps.workflow.models import WorkflowMixin
-from apps.workflow.uploads import IMAGE_VALIDATORS
+from apps.workflow.uploads import IMAGE_VALIDATORS, STORY_VALIDATORS, story_upload_to
 
 
 class Publication(WorkflowMixin):
@@ -42,6 +42,8 @@ class Publication(WorkflowMixin):
     cover_url = models.URLField(blank=True)
     # An uploaded cover wins over cover_url when both are set.
     cover = models.FileField(upload_to="covers/", blank=True, validators=IMAGE_VALIDATORS)
+    # A data story's body as one self-contained HTML file; the frontend renders it in a sandboxed iframe.
+    story_html = models.FileField(upload_to=story_upload_to, blank=True, validators=STORY_VALIDATORS)
 
     def __str__(self):
         return self.title

@@ -1,5 +1,8 @@
+import tempfile
 from datetime import date
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from apps.taxonomy.models import Theme
@@ -154,3 +157,80 @@ class SubThemeRequirementTests(APITestCase):
         response = self.client.get(f"/api/v1/publications/?theme={self.top_level_theme.pk}")
         slugs = {item["slug"] for item in response.data["results"]}
         self.assertEqual(slugs, {"gov-report-1", "gov-report-2"})
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class StoryHtmlUploadTests(APITestCase):
+    STORY = (
+        '<article id="s"><p>Body</p></article>'
+        '<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>'
+        "<script>console.log(1)</script>"
+    )
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.user = get_user_model().objects.create_user(
+            username="storyteller", password="pw12345", role="researcher"
+        )
+        self.client.force_authenticate(self.user)
+        governance = Theme.objects.get(slug="governance")
+        self.sub_theme = Theme.objects.create(slug="health-capacity", name="Capacity", parent=governance)
+
+    def _upload(self, content, name="story.html"):
+        payload = {
+            "slug": "health-story",
+            "title": "Health story",
+            "abstract": "x",
+            "format": "data_story",
+            "sub_theme": self.sub_theme.pk,
+            "date": "2026-10-08",
+            "story_html": SimpleUploadedFile(
+                name, content if isinstance(content, bytes) else content.encode(), "text/html"
+            ),
+        }
+        return self.client.post("/api/v1/publications/", payload, format="multipart")
+
+    def test_story_with_pinned_cdn_script_is_accepted_and_stored_as_text(self):
+        response = self._upload(self.STORY)
+        self.assertEqual(response.status_code, 201, response.data)
+        stored = Publication.objects.get(slug="health-story").story_html
+        self.assertTrue(stored.name.startswith("stories/") and stored.name.endswith(".txt"))
+        self.assertIn("/stories/", response.data["story_html"])
+        stored.open("rb")
+        self.assertEqual(stored.read().decode(), self.STORY)
+        stored.close()
+
+    def test_jsdelivr_script_is_accepted(self):
+        response = self._upload('<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>')
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_script_from_another_host_is_refused_by_name(self):
+        response = self._upload('<p>x</p><SCRIPT SRC="https://evil.example/x.js"></SCRIPT>')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("https://evil.example/x.js", str(response.data["story_html"]))
+
+    def test_protocol_relative_script_is_refused(self):
+        response = self._upload('<script src="//cdnjs.cloudflare.com/x.js"></script>')
+        self.assertEqual(response.status_code, 400)
+
+    def test_non_html_extension_is_refused(self):
+        response = self._upload("<p>x</p>", name="story.js")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("story_html", response.data)
+
+    def test_non_utf8_file_is_refused(self):
+        response = self._upload(b"<p>\xff\xfe caf\xe9</p>")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("UTF-8", str(response.data["story_html"]))
+
+    def test_oversize_file_is_refused(self):
+        response = self._upload("<p>" + "x" * (5 * 1024 * 1024) + "</p>")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("5 MB", str(response.data["story_html"]))
+
+    def test_story_is_optional_and_can_be_removed(self):
+        self.assertEqual(self._upload(self.STORY).status_code, 201)
+        response = self.client.patch("/api/v1/publications/health-story/", {"story_html": ""}, format="multipart")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(Publication.objects.get(slug="health-story").story_html)

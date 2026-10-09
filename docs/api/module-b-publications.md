@@ -26,6 +26,7 @@ Per PRD's Implementation Decisions (`docs/PRDs/B-publication-repository-module.m
 - **`visibility`** — `public`/`private` (PRD line 32). Enforcement: private publications excluded from public list/detail responses — same discipline as Module C's tiers.
 - **`tags`** — Postgres `ArrayField`.
 - **`cover`** — optional uploaded cover image beside `cover_url`; same rules as Module A's image uploads (JPG/PNG/WebP, 5 MB, `null` removes, the upload wins when both are set).
+- **`story_html`** — optional data story body: one self-contained `.html`/`.htm` file, UTF-8, up to 5 MB, whose `<script src>` URLs must all start with `https://cdnjs.cloudflare.com/` or `https://cdn.jsdelivr.net/npm/` (the field error names any refused URL). Stored as `stories/<random>.txt`, so the URL it reads as (presigned on S3) serves the source as plain text rather than running it; the frontend fetches the text and renders it in a sandboxed iframe. Multipart only; `null` or an empty value removes it.
 - **`PublicationVersion`** — `publication` FK, `version_number`, `file`, `uploaded_by`, `is_current`, `created_at` (PRD line 29-30). `file` uses the S3-backed storage decision (see [README.md](README.md#file-storage)).
 
 ## Citation export
