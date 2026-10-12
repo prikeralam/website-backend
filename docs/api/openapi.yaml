@@ -7094,7 +7094,6 @@ components:
       - id
       - name
       - reviewed_by
-      - role_title
       - slug
       - status
       - updated_at
