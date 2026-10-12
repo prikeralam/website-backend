@@ -6710,6 +6710,13 @@ components:
           maxLength: 300
         stage:
           $ref: '#/components/schemas/StageEnum'
+        facts:
+          type: array
+          items:
+            type: string
+            maxLength: 500
+        details:
+          type: string
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
@@ -7125,6 +7132,13 @@ components:
           maxLength: 300
         stage:
           $ref: '#/components/schemas/StageEnum'
+        facts:
+          type: array
+          items:
+            type: string
+            maxLength: 500
+        details:
+          type: string
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
