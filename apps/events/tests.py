@@ -202,3 +202,55 @@ class OctoberEventsMigrationTests(TestCase):
     def test_creates_nothing_without_users(self):
         self.load()
         self.assertEqual(Event.objects.count(), 0)
+
+
+class MergeHandEnteredDuplicatesTests(TestCase):
+    def merge(self):
+        from django.apps import apps
+
+        importlib.import_module("apps.events.migrations.0004_merge_hand_entered_duplicates").merge(apps, None)
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner9", password="pw12345", role="admin")
+
+    def event(self, slug, **fields):
+        return Event.objects.create(slug=slug, created_by=self.owner, status="published", **fields)
+
+    def test_details_move_onto_the_hand_entered_row_and_the_copy_is_deleted(self):
+        kept = self.event(
+            "kerala-demographic-conclave-navigating-p",
+            title="Kerala Demographic Conclave",
+            start_date="2026-12-24",
+            summary="Collaborators: ...\r\nFocus Areas: ...",
+            location="Thiruvananthapuram",
+            image="events/conclave.png",
+        )
+        copy = self.event(
+            "kerala-demographic-conclave-2026",
+            title="Kerala Demographic Conclave: Navigating Population Transition and Policy Realities",
+            start_date="2026-12-14",
+            summary="A one-day conclave.",
+            location="Thiruvananthapuram",
+            mode="hybrid",
+            start_time="09:30",
+            date_note="December 2026 (3rd or 4th week)",
+            speakers=["Key participants: Demographers"],
+            focus_areas=["Demographic transition: Fertility declines"],
+        )
+        EventImage.objects.create(event=copy, image="events/gallery/a.png")
+        self.merge()
+
+        kept.refresh_from_db()
+        self.assertFalse(Event.objects.filter(slug="kerala-demographic-conclave-2026").exists())
+        self.assertEqual(kept.summary, "A one-day conclave.")
+        self.assertEqual((kept.mode, kept.date_note), ("hybrid", "December 2026 (3rd or 4th week)"))
+        self.assertEqual(kept.focus_areas, ["Demographic transition: Fertility declines"])
+        # The owner's own choices stay: start date, photo, slug.
+        self.assertEqual((str(kept.start_date), kept.image.name), ("2026-12-24", "events/conclave.png"))
+        self.assertEqual(kept.images.count(), 1)
+
+    def test_does_nothing_without_the_hand_entered_row(self):
+        self.event("legislative-leadership-forum-2026", title="Forum", start_date="2026-10-03", mode="in_person")
+        self.merge()
+        self.merge()
+        self.assertEqual(list(Event.objects.values_list("slug", flat=True)), ["legislative-leadership-forum-2026"])

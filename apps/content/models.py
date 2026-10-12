@@ -45,7 +45,8 @@ class PersonProfile(WorkflowMixin):
     ]
     slug = models.SlugField(unique=True)
     name = models.CharField(max_length=200)
-    role_title = models.CharField(max_length=200)
+    # Required for every group but the Advisory Body, which shows no roles (checked in the serializer).
+    role_title = models.CharField(max_length=200, blank=True)
     group = models.CharField(max_length=20, choices=GROUP_CHOICES)
     bio = models.TextField(blank=True)
     photo_url = models.URLField(blank=True)

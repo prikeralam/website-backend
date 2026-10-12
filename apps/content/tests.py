@@ -22,9 +22,7 @@ class ContentBlockSlugLookupTests(APITestCase):
 
         self.user = make_user(get_user_model(), "researcher", "researcher1")
         self.client.force_authenticate(self.user)
-        self.block = ContentBlock.objects.create(
-            slug="hero-copy", title="Hero", body="Body text", created_by=self.user
-        )
+        self.block = ContentBlock.objects.create(slug="hero-copy", title="Hero", body="Body text", created_by=self.user)
 
     def test_retrieve_by_slug(self):
         response = self.client.get(f"/api/v1/content-blocks/{self.block.slug}/")
@@ -125,9 +123,7 @@ class WorkflowTransitionPermissionTests(APITestCase):
 
     def test_own_contributor_can_submit_for_review(self):
         self.client.force_authenticate(self.researcher)
-        response = self.client.post(
-            f"/api/v1/content-blocks/{self.block.slug}/transition/", {"status": "in_review"}
-        )
+        response = self.client.post(f"/api/v1/content-blocks/{self.block.slug}/transition/", {"status": "in_review"})
         self.assertEqual(response.status_code, 200)
         self.block.refresh_from_db()
         self.assertEqual(self.block.status, "in_review")
@@ -136,18 +132,14 @@ class WorkflowTransitionPermissionTests(APITestCase):
         self.block.status = "in_review"
         self.block.save(update_fields=["status"])
         self.client.force_authenticate(self.researcher)
-        response = self.client.post(
-            f"/api/v1/content-blocks/{self.block.slug}/transition/", {"status": "approved"}
-        )
+        response = self.client.post(f"/api/v1/content-blocks/{self.block.slug}/transition/", {"status": "approved"})
         self.assertEqual(response.status_code, 403)
 
     def test_editor_can_approve(self):
         self.block.status = "in_review"
         self.block.save(update_fields=["status"])
         self.client.force_authenticate(self.editor)
-        response = self.client.post(
-            f"/api/v1/content-blocks/{self.block.slug}/transition/", {"status": "approved"}
-        )
+        response = self.client.post(f"/api/v1/content-blocks/{self.block.slug}/transition/", {"status": "approved"})
         self.assertEqual(response.status_code, 200)
 
 
@@ -270,7 +262,11 @@ class PersonContactLinkTests(APITestCase):
         self.assertEqual((response.data["linkedin_url"], response.data["email"]), ("", ""))
 
     def test_linkedin_link_must_be_https_on_linkedin(self):
-        for url in ["http://www.linkedin.com/in/asha", "https://evil.example/linkedin.com", "https://linkedin.com.evil.example/in/a"]:
+        for url in [
+            "http://www.linkedin.com/in/asha",
+            "https://evil.example/linkedin.com",
+            "https://linkedin.com.evil.example/in/a",
+        ]:
             with self.subTest(url=url):
                 response = self.create(slug=f"p-{abs(hash(url)) % 10000}", linkedin_url=url)
                 self.assertEqual(response.status_code, 400)
@@ -313,3 +309,34 @@ class PersonOrderAndWebsiteTests(APITestCase):
         response = self.create("a", website_url="http://safi.ac.in")
         self.assertEqual(response.status_code, 400)
         self.assertIn("website_url", response.data)
+
+
+class PersonRoleOptionalForAdvisoryTests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.client.force_authenticate(make_user(get_user_model(), "editor", "editor9"))
+
+    def create(self, group, role_title=""):
+        body = {"slug": f"p-{group}", "name": "P", "group": group, "role_title": role_title}
+        return self.client.post("/api/v1/people/", body, format="json")
+
+    def test_advisory_members_need_no_role(self):
+        response = self.create("advisory")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["role_title"], "")
+
+    def test_other_groups_still_need_a_role(self):
+        for group in ["team", "patron", "executive", "partner"]:
+            response = self.create(group, "  ")
+            self.assertEqual(response.status_code, 400, group)
+            self.assertIn("role_title", response.data)
+
+    def test_moving_a_roleless_member_out_of_advisory_needs_a_role(self):
+        person_id = self.create("advisory").data["id"]
+        response = self.client.patch(f"/api/v1/people/{person_id}/", {"group": "team"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        response = self.client.patch(
+            f"/api/v1/people/{person_id}/", {"group": "team", "role_title": "Analyst"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200, response.data)
