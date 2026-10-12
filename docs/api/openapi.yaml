@@ -1850,6 +1850,57 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/events/{slug}/images/:
+    post:
+      operationId: v1_events_images_create
+      description: Add a photo to the event's gallery (JPG, PNG or WebP up to 5 MB,
+        optional caption).
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Events & Campaigns
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EventImage'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventImage'
+          description: ''
+  /api/v1/events/{slug}/images/{image_id}/:
+    delete:
+      operationId: v1_events_images_destroy
+      description: Remove one gallery photo; its stored file is deleted too.
+      parameters:
+      - in: path
+        name: image_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Events & Campaigns
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/events/{slug}/transition/:
     post:
       operationId: v1_events_transition_create
@@ -4568,6 +4619,9 @@ components:
       - module
       - target
       - timestamp
+    BlankEnum:
+      enum:
+      - ''
     CategoryEnum:
       enum:
       - general
@@ -5103,6 +5157,36 @@ components:
         location:
           type: string
           maxLength: 200
+        mode:
+          oneOf:
+          - $ref: '#/components/schemas/EventModeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        start_time:
+          type: string
+          format: time
+          nullable: true
+        end_time:
+          type: string
+          format: time
+          nullable: true
+        date_note:
+          type: string
+          maxLength: 200
+        collaborators:
+          type: array
+          items:
+            type: string
+            maxLength: 500
+        speakers:
+          type: array
+          items:
+            type: string
+            maxLength: 500
+        focus_areas:
+          type: array
+          items:
+            type: string
+            maxLength: 500
         image_url:
           oneOf:
           - type: string
@@ -5115,6 +5199,11 @@ components:
           format: uri
           nullable: true
           pattern: (?:jpg|jpeg|png|webp)$
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventImage'
+          readOnly: true
         registration_url:
           oneOf:
           - type: string
@@ -5150,6 +5239,7 @@ components:
       - created_at
       - created_by
       - id
+      - images
       - published_at
       - reviewed_by
       - slug
@@ -5157,6 +5247,24 @@ components:
       - status
       - title
       - updated_at
+    EventImage:
+      type: object
+      description: A gallery photo. Written as multipart (`image`, optional `caption`);
+        reads as its URL (presigned on S3).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        image:
+          type: string
+          format: uri
+          pattern: (?:jpg|jpeg|png|webp)$
+        caption:
+          type: string
+          maxLength: 200
+      required:
+      - id
+      - image
     EventKindEnum:
       enum:
       - event
@@ -5165,6 +5273,16 @@ components:
       description: |-
         * `event` - Event
         * `campaign` - Campaign
+    EventModeEnum:
+      enum:
+      - in_person
+      - online
+      - hybrid
+      type: string
+      description: |-
+        * `in_person` - In person
+        * `online` - Online
+        * `hybrid` - Hybrid
     GroupEnum:
       enum:
       - team
@@ -6284,6 +6402,36 @@ components:
         location:
           type: string
           maxLength: 200
+        mode:
+          oneOf:
+          - $ref: '#/components/schemas/EventModeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        start_time:
+          type: string
+          format: time
+          nullable: true
+        end_time:
+          type: string
+          format: time
+          nullable: true
+        date_note:
+          type: string
+          maxLength: 200
+        collaborators:
+          type: array
+          items:
+            type: string
+            maxLength: 500
+        speakers:
+          type: array
+          items:
+            type: string
+            maxLength: 500
+        focus_areas:
+          type: array
+          items:
+            type: string
+            maxLength: 500
         image_url:
           oneOf:
           - type: string
@@ -6296,6 +6444,11 @@ components:
           format: uri
           nullable: true
           pattern: (?:jpg|jpeg|png|webp)$
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventImage'
+          readOnly: true
         registration_url:
           oneOf:
           - type: string
