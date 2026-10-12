@@ -98,6 +98,16 @@ class PersonProfileSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Enter an https:// link to a linkedin.com profile.")
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        group = attrs.get("group", getattr(self.instance, "group", None))
+        role = attrs.get("role_title", getattr(self.instance, "role_title", ""))
+        if group != "advisory" and not (role or "").strip():
+            raise serializers.ValidationError(
+                {"role_title": "Add a role. Only Advisory Body members can be left without one."}
+            )
+        return attrs
+
     def validate_website_url(self, value):
         # Partners' cards link straight to it.
         if value and urlparse(value).scheme != "https":
