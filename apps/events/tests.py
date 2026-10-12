@@ -254,3 +254,68 @@ class MergeHandEnteredDuplicatesTests(TestCase):
         self.merge()
         self.merge()
         self.assertEqual(list(Event.objects.values_list("slug", flat=True)), ["legislative-leadership-forum-2026"])
+
+
+ANDROTH_SLUG = "political-data-intelligence-in-the-digit"
+SIR_SLUG = "sir-update-today-decide-tomorrow-2025"
+
+
+class RestoreEventDetailsTests(TestCase):
+    def restore(self):
+        from django.apps import apps
+
+        importlib.import_module("apps.events.migrations.0005_restore_event_details").restore(apps, None)
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner8", password="pw12345", role="admin")
+
+    def event(self, slug, **fields):
+        return Event.objects.create(slug=slug, created_by=self.owner, status="published", **fields)
+
+    def test_fills_empty_details_and_keeps_the_owners_date_and_photo(self):
+        forum = self.event(
+            "legislative-leadership-forum-good-govern",
+            title="Legislative Leadership Forum",
+            start_date="2026-10-03",
+            summary="Collaborators: IUML\r\nFocus Areas: ...",
+            location="Vazhayur",
+            image="events/league_event.jpeg",
+        )
+        self.restore()
+        forum.refresh_from_db()
+        self.assertEqual((forum.mode, forum.location), ("in_person", "SAFI College, Vazhayur"))
+        self.assertEqual(len(forum.speakers), 5)
+        self.assertFalse(forum.summary.startswith("Collaborators"))
+        self.assertEqual((str(forum.start_date), forum.image.name), ("2026-10-03", "events/league_event.jpeg"))
+
+    def test_leaves_events_staff_have_since_filled_in(self):
+        conclave = self.event(
+            "kerala-demographic-conclave-navigating-p",
+            title="Conclave",
+            start_date="2026-12-24",
+            summary="Staff's own summary.",
+            mode="hybrid",
+        )
+        androth = self.event(ANDROTH_SLUG, title="Lecture", start_date="2025-12-05", summary="A lecture.")
+        self.restore()
+        conclave.refresh_from_db()
+        androth.refresh_from_db()
+        self.assertEqual((conclave.summary, conclave.speakers), ("Staff's own summary.", []))
+        self.assertEqual((androth.summary, str(androth.start_date)), ("A lecture.", "2025-12-05"))
+
+    def test_restores_the_androth_summary_and_date_and_the_sir_title(self):
+        androth = self.event(
+            ANDROTH_SLUG, title="Lecture", start_date="2025-04-12", summary="Speaker: Muhammed Thufail"
+        )
+        sir = self.event(SIR_SLUG, title="SIR: “Update Today, Decide Tomorrow�", start_date="2025-11-02")
+        self.restore()
+        self.restore()
+        androth.refresh_from_db()
+        sir.refresh_from_db()
+        self.assertEqual(str(androth.start_date), "2025-12-04")
+        self.assertTrue(androth.summary.startswith("An online lecture"))
+        self.assertEqual(sir.title, "SIR: “Update Today, Decide Tomorrow”")
+
+    def test_does_nothing_on_a_fresh_database(self):
+        self.restore()
+        self.assertEqual(Event.objects.count(), 0)
