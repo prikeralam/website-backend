@@ -216,6 +216,7 @@ SPECTACULAR_SETTINGS = {
         "ApplicationKindEnum": "apps.careers.models.APPLICATION_KIND_CHOICES",
         "ApplicationStatusEnum": "apps.careers.models.APPLICATION_STATUS_CHOICES",
         "EventKindEnum": "apps.events.models.EVENT_KIND_CHOICES",
+        "EventModeEnum": "apps.events.models.EVENT_MODE_CHOICES",
     },
     "SERVE_INCLUDE_SCHEMA": False,
     # Explicit order (Swagger UI otherwise sorts tags alphabetically); mirrors docs/api/*.md.
