@@ -319,4 +319,3 @@ class RestoreEventDetailsTests(TestCase):
     def test_does_nothing_on_a_fresh_database(self):
         self.restore()
         self.assertEqual(Event.objects.count(), 0)
-
