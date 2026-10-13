@@ -189,3 +189,24 @@ class InitialOpeningsMigrationTests(APITestCase):
     def test_skips_a_database_without_users(self):
         self.migration.create_openings(apps, None)
         self.assertFalse(JobOpening.objects.exists())
+
+
+class JobDescriptionsMigrationTests(APITestCase):
+    def add(self):
+        import_module("apps.careers.migrations.0003_job_descriptions").add_descriptions(apps, None)
+
+    def test_fills_only_empty_descriptions(self):
+        owner = get_user_model().objects.create_user(username="owner7", password="pw12345", role="admin")
+        JobOpening.objects.create(slug="research-associate", title="Research Associate", created_by=owner)
+        JobOpening.objects.create(
+            slug="data-analyst", title="Data Analyst", description="Staff's own text.", created_by=owner
+        )
+        self.add()
+        self.add()
+        self.assertTrue(JobOpening.objects.get(slug="research-associate").description.startswith("## What you'll do"))
+        self.assertEqual(JobOpening.objects.get(slug="data-analyst").description, "Staff's own text.")
+
+    def test_has_no_em_dashes(self):
+        descriptions = import_module("apps.careers.migrations.0003_job_descriptions").DESCRIPTIONS
+        for text in descriptions.values():
+            self.assertNotIn("—", text)
