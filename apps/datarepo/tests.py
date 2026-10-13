@@ -72,10 +72,12 @@ class DatasetVisibilityTests(APITestCase):
         slugs = self._list_slugs(self.editor)
         self.assertIn("internal-ds", slugs)
 
-    def test_public_dataset_downloadable_by_any_authenticated_user(self):
+    def test_public_dataset_downloadable_once_the_email_is_confirmed(self):
         self.client.force_authenticate(self.public_user)
-        response = self.client.get("/api/v1/datasets/public-ds/download/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/datasets/public-ds/download/").status_code, 403)
+        self.public_user.email_verified = True
+        self.public_user.save(update_fields=["email_verified"])
+        self.assertEqual(self.client.get("/api/v1/datasets/public-ds/download/").status_code, 200)
 
     def test_on_request_dataset_blocked_without_approval(self):
         self.client.force_authenticate(self.public_user)
@@ -527,6 +529,9 @@ class DatasetFormatsTests(APITestCase):
 
         User = get_user_model()
         self.visitor = User.objects.create_user(username="visitor", password="pw12345", role="public")
+        self.reader = User.objects.create_user(
+            username="reader", password="pw12345", role="public", email_verified=True
+        )
         self.researcher = User.objects.create_user(username="researcher", password="pw12345", role="researcher")
         self.other = User.objects.create_user(username="other", password="pw12345", role="researcher")
         self.editor = User.objects.create_user(username="editor", password="pw12345", role="editor")
@@ -558,7 +563,7 @@ class DatasetFormatsTests(APITestCase):
         self.assertEqual(self.add("plus-one", "json").status_code, 201)
         self.assertEqual(self.add("plus-one", "parquet", content=b"PAR1").status_code, 201)
 
-        self.client.force_authenticate(None)
+        self.client.force_authenticate(self.reader)  # downloads need a confirmed account
         files = self.client.get("/api/v1/datasets/plus-one/").data["files"]
         self.assertEqual(
             [(f["format"], f["label"]) for f in files], [("csv", "CSV"), ("json", "JSON"), ("parquet", "Parquet")]
@@ -570,7 +575,7 @@ class DatasetFormatsTests(APITestCase):
     def test_download_picks_a_format(self):
         self.dataset("plus-one")
         self.add("plus-one", "json")
-        self.client.force_authenticate(None)
+        self.client.force_authenticate(self.reader)
         self.assertTrue(self.client.get("/api/v1/datasets/plus-one/download/").data["file"].endswith(".csv"))
         self.assertTrue(
             self.client.get("/api/v1/datasets/plus-one/download/?format=json").data["file"].endswith(".json")

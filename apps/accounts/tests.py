@@ -204,7 +204,8 @@ class ListAndDetailTests(UserManagementTestCase):
             self.assertEqual(
                 set(row),
                 {"id", "username", "email", "first_name", "last_name", "role",
-                 "is_active", "must_change_password", "date_joined", "last_login"},
+                 "is_active", "must_change_password", "date_joined", "last_login",
+                 "email_verified", "organisation", "purpose", "newsletter_opt_in"},
             )
 
     def test_me_is_not_mistaken_for_a_user_id(self):
@@ -445,3 +446,126 @@ class PasswordResetTests(UserManagementTestCase):
 def link_params(body):
     query = parse_qs(urlparse(re.search(r"http\S+/reset-password\?\S+", body).group(0)).query)
     return query["uid"][0], query["token"][0]
+
+
+@override_settings(FRONTEND_URL="https://pri.example")
+class VisitorSignupTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()  # throttle counters live in the cache
+        self.client = APIClient()
+
+    def register(self, **overrides):
+        body = {
+            "email": "Reader@Example.org",
+            "password": "a-long-pass-phrase-9",
+            "first_name": "Asha",
+            "last_name": "K",
+            "organisation": "Calicut University",
+            "purpose": "research",
+            "newsletter_opt_in": True,
+            "next": "/data/plus-one-batch-size",
+            **overrides,
+        }
+        # The confirmation email goes out once the new account is committed.
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client.post("/api/v1/register/", body, format="json")
+
+    def link_params(self):
+        url = re.search(r"https://pri\.example/\S+", mail.outbox[-1].body).group(0)
+        return {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
+
+    def test_signup_creates_an_unconfirmed_visitor_and_emails_a_link_back_to_the_dataset(self):
+        response = self.register()
+        self.assertEqual(response.status_code, 202)
+        user = get_user_model().objects.get(email="reader@example.org")
+        self.assertEqual((user.username, user.role, user.email_verified), ("reader@example.org", "public", False))
+        answers = (user.organisation, user.purpose, user.newsletter_opt_in)
+        self.assertEqual(answers, ("Calicut University", "research", True))
+        self.assertEqual(mail.outbox[-1].to, ["reader@example.org"])
+        self.assertEqual(self.link_params()["next"], "/data/plus-one-batch-size")
+
+    def test_an_unsafe_next_is_dropped_from_the_link(self):
+        self.register(next="https://evil.example/")
+        self.assertNotIn("next", self.link_params())
+        self.assertEqual(get_user_model().objects.count(), 1)
+
+    def test_an_existing_address_gets_the_same_answer_and_a_sign_in_email_instead(self):
+        self.register()
+        response = self.register(email="READER@example.org", password="another-long-pass-7")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), {"detail": "Check your inbox: we've sent you an email to finish signing up."})
+        self.assertEqual(get_user_model().objects.count(), 1)
+        self.assertEqual(mail.outbox[-1].subject, "You already have a PRI account")
+
+    def test_weak_passwords_and_missing_fields_are_refused(self):
+        self.assertIn("password", self.register(password="123").json())
+        self.assertIn("purpose", self.register(email="b@example.org", purpose="spying").json())
+        self.assertIn("first_name", self.register(email="c@example.org", first_name="").json())
+        self.assertEqual(get_user_model().objects.count(), 0)
+
+    def test_signups_are_throttled_per_address(self):
+        for _ in range(5):
+            self.register()
+        self.assertEqual(self.register().status_code, 429)
+
+    def test_the_link_confirms_the_email_once(self):
+        self.register()
+        params = self.link_params()
+        body = {"uid": params["uid"], "token": params["token"]}
+        self.assertEqual(self.client.post("/api/v1/verify-email/", body, format="json").status_code, 204)
+        self.assertTrue(get_user_model().objects.get(email="reader@example.org").email_verified)
+        self.assertEqual(self.client.post("/api/v1/verify-email/", body, format="json").status_code, 400)
+
+    def test_a_tampered_link_is_refused(self):
+        self.register()
+        params = self.link_params()
+        response = self.client.post("/api/v1/verify-email/", {"uid": params["uid"], "token": "x-y"}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def login(self, username, password):
+        return self.client.post("/api/v1/token/", {"username": username, "password": password}, format="json")
+
+    def test_visitors_sign_in_with_their_email_and_staff_with_their_username(self):
+        self.register()
+        self.assertEqual(self.login("READER@example.org", "a-long-pass-phrase-9").status_code, 200)
+        get_user_model().objects.create_user(username="staffer", email="staff@example.org", password="pw12345-long")
+        for name in ["staffer", "staff@example.org"]:
+            with self.subTest(name=name):
+                self.assertEqual(self.login(name, "pw12345-long").status_code, 200)
+
+    def test_an_email_shared_by_two_accounts_cannot_sign_in_by_email(self):
+        User = get_user_model()
+        User.objects.create_user(username="one", email="shared@example.org", password="pw12345-long")
+        User.objects.create_user(username="two", email="Shared@example.org", password="pw12345-long")
+        self.assertEqual(self.login("shared@example.org", "pw12345-long").status_code, 401)
+
+    def test_resend_sends_a_new_link_only_while_unconfirmed(self):
+        self.register()
+        user = get_user_model().objects.get(email="reader@example.org")
+        self.client.force_authenticate(user)
+        sent = len(mail.outbox)
+        self.assertEqual(self.client.post("/api/v1/users/me/resend-verification/", {}, format="json").status_code, 204)
+        self.assertEqual(len(mail.outbox), sent + 1)
+        user.email_verified = True
+        user.save(update_fields=["email_verified"])
+        self.client.post("/api/v1/users/me/resend-verification/", {}, format="json")
+        self.assertEqual(len(mail.outbox), sent + 1)
+
+    def test_me_shows_and_edits_the_signup_answers_but_not_the_confirmation(self):
+        self.register()
+        user = get_user_model().objects.get(email="reader@example.org")
+        self.client.force_authenticate(user)
+        body = {"newsletter_opt_in": False, "email_verified": True}
+        data = self.client.patch("/api/v1/users/me/", body, format="json").json()
+        self.assertEqual((data["newsletter_opt_in"], data["email_verified"]), (False, False))
+
+    def test_accounts_made_by_admins_count_as_confirmed(self):
+        admin = get_user_model().objects.create_user(username="boss", password="pw12345-long", role="admin")
+        self.client.force_authenticate(admin)
+        response = self.client.post(
+            "/api/v1/users/", {"username": "newbie", "email": "newbie@example.org", "role": "researcher"}, format="json"
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(get_user_model().objects.get(username="newbie").email_verified)
