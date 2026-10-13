@@ -8,8 +8,11 @@ from .views import (
     MyRoleView,
     PasswordResetConfirmView,
     PasswordResetView,
+    RegisterView,
+    ResendVerificationView,
     UserRoleUpdateView,
     UserViewSet,
+    VerifyEmailView,
 )
 
 router = SimpleRouter()
@@ -19,6 +22,9 @@ urlpatterns = [
     path("users/me/", MeView.as_view(), name="me"),
     path("users/me/role/", MyRoleView.as_view(), name="my-role"),
     path("users/me/password/", MyPasswordView.as_view(), name="my-password"),
+    path("users/me/resend-verification/", ResendVerificationView.as_view(), name="resend-verification"),
+    path("register/", RegisterView.as_view(), name="register"),
+    path("verify-email/", VerifyEmailView.as_view(), name="verify-email"),
     path("users/<int:pk>/role/", UserRoleUpdateView.as_view(), name="user-role-update"),
     path("password-reset/", PasswordResetView.as_view(), name="password-reset"),
     path("password-reset/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),

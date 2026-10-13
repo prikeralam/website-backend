@@ -204,18 +204,26 @@ class DatasetLeakTests(PublicReadTestCase):
                 for suffix in ["", "download/", "preview/table/"]:
                     self.assertEqual(self.client.get(f"/api/v1/datasets/{slug}/{suffix}").status_code, 404)
 
-    def test_file_url_is_only_exposed_where_download_is_allowed(self):
+    def test_file_url_is_never_exposed_anonymously(self):
+        # Every download needs a signed-in account with a confirmed email, public datasets included.
         by_slug = {item["slug"]: item for item in self.client.get("/api/v1/datasets/").json()["results"]}
-        self.assertIn("file", by_slug["open-ds"])
+        self.assertNotIn("file", by_slug["open-ds"])
         self.assertNotIn("file", by_slug["gated-ds"])
         self.assertNotIn("file", self.client.get("/api/v1/datasets/gated-ds/").json())
+
+    def test_public_file_url_needs_a_confirmed_email(self):
+        self.client.force_authenticate(self.visitor)
+        self.assertNotIn("file", self.client.get("/api/v1/datasets/open-ds/").json())
+        self.visitor.email_verified = True
+        self.visitor.save(update_fields=["email_verified"])
+        self.assertIn("file", self.client.get("/api/v1/datasets/open-ds/").json())
 
     def test_on_request_file_url_stays_hidden_from_signed_in_users_without_approval(self):
         self.client.force_authenticate(self.visitor)
         self.assertNotIn("file", self.client.get("/api/v1/datasets/gated-ds/").json())
 
-    def test_anonymous_can_download_public_but_not_on_request(self):
-        self.assertEqual(self.client.get("/api/v1/datasets/open-ds/download/").status_code, 200)
+    def test_anonymous_can_download_nothing(self):
+        self.assertEqual(self.client.get("/api/v1/datasets/open-ds/download/").status_code, 403)
         self.assertEqual(self.client.get("/api/v1/datasets/gated-ds/download/").status_code, 403)
 
     def test_anonymous_can_preview_a_public_dataset(self):

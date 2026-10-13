@@ -3449,6 +3449,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/Recognition'
           description: ''
+  /api/v1/register/:
+    post:
+      operationId: v1_register_create
+      description: |-
+        A visitor creates their own account (role `public`) and is emailed a link to confirm their address.
+
+        Answers 202 the same way whether or not the address is new, so it can't reveal which addresses have
+        accounts: an existing account's owner is emailed a sign-in and reset link instead.
+      tags:
+      - Module H — Users & Roles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Register'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Register'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Register'
+        required: true
+      security:
+      - {}
+      responses:
+        '202':
+          description: No response body
   /api/v1/testimonials/:
     get:
       operationId: v1_testimonials_list
@@ -4020,7 +4047,7 @@ paths:
     post:
       operationId: v1_token_create
       description: |-
-        Exchanges a username and password for an access/refresh token pair.
+        Exchanges a username or email address, and a password, for an access/refresh token pair.
 
         Throttled per username: the sixth attempt within a minute answers 429.
       tags:
@@ -4416,6 +4443,29 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/users/me/resend-verification/:
+    post:
+      operationId: v1_users_me_resend_verification_create
+      description: Emails the signed-in user a new confirmation link, unless their
+        address is already confirmed.
+      tags:
+      - Module H — Users & Roles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResendVerification'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ResendVerification'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ResendVerification'
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/users/me/role/:
     get:
       operationId: v1_users_me_role_retrieve
@@ -4430,6 +4480,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/MyRole'
           description: ''
+  /api/v1/verify-email/:
+    post:
+      operationId: v1_verify_email_create
+      description: Confirms an address from an emailed link. Each link works once.
+      tags:
+      - Module H — Users & Roles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmail'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyEmail'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyEmail'
+        required: true
+      security:
+      - {}
+      responses:
+        '204':
+          description: No response body
 components:
   schemas:
     AccessRequest:
@@ -6967,8 +7040,9 @@ components:
       description: |-
         A user as admins see them, and as a user sees themselves at /users/me/.
 
-        Only contact details are writable here: the role has its own audited endpoint, `is_active` its
-        deactivate/reactivate actions, and passwords their own flows.
+        Only contact details and sign-up answers are writable here: the role has its own audited endpoint,
+        `is_active` its deactivate/reactivate actions, passwords their own flows, and `email_verified` changes
+        only through a confirmation link.
       properties:
         id:
           type: integer
@@ -7011,6 +7085,18 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+        email_verified:
+          type: boolean
+          readOnly: true
+        organisation:
+          type: string
+          maxLength: 200
+        purpose:
+          oneOf:
+          - $ref: '#/components/schemas/PurposeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        newsletter_opt_in:
+          type: boolean
     PersonProfile:
       type: object
       properties:
@@ -7291,6 +7377,24 @@ components:
       description: |-
         * `public` - Public
         * `private` - Private
+    PurposeEnum:
+      enum:
+      - research
+      - journalism
+      - policy
+      - teaching
+      - business
+      - personal
+      - other
+      type: string
+      description: |-
+        * `research` - Research
+        * `journalism` - Journalism
+        * `policy` - Policy or government
+        * `teaching` - Teaching or study
+        * `business` - Business
+        * `personal` - Personal interest
+        * `other` - Other
     Recognition:
       type: object
       properties:
@@ -7361,6 +7465,51 @@ components:
       - title
       - updated_at
       - year
+    Register:
+      type: object
+      description: A visitor's own sign-up. The email doubles as the username; `next`
+        is where the confirmation link returns.
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 150
+        password:
+          type: string
+          writeOnly: true
+          maxLength: 128
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          default: ''
+          maxLength: 150
+        organisation:
+          type: string
+          default: ''
+          maxLength: 200
+        purpose:
+          $ref: '#/components/schemas/PurposeEnum'
+        newsletter_opt_in:
+          type: boolean
+          default: false
+        next:
+          type: string
+          default: ''
+          maxLength: 200
+      required:
+      - email
+      - first_name
+      - password
+      - purpose
+    ResendVerification:
+      type: object
+      properties:
+        next:
+          type: string
+          default: ''
+          maxLength: 200
     RoleEnum:
       enum:
       - public
@@ -7548,8 +7697,9 @@ components:
       description: |-
         A user as admins see them, and as a user sees themselves at /users/me/.
 
-        Only contact details are writable here: the role has its own audited endpoint, `is_active` its
-        deactivate/reactivate actions, and passwords their own flows.
+        Only contact details and sign-up answers are writable here: the role has its own audited endpoint,
+        `is_active` its deactivate/reactivate actions, passwords their own flows, and `email_verified` changes
+        only through a confirmation link.
       properties:
         id:
           type: integer
@@ -7592,9 +7742,22 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+        email_verified:
+          type: boolean
+          readOnly: true
+        organisation:
+          type: string
+          maxLength: 200
+        purpose:
+          oneOf:
+          - $ref: '#/components/schemas/PurposeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        newsletter_opt_in:
+          type: boolean
       required:
       - date_joined
       - email
+      - email_verified
       - id
       - is_active
       - last_login
@@ -7646,6 +7809,17 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+        email_verified:
+          type: boolean
+        organisation:
+          type: string
+          maxLength: 200
+        purpose:
+          oneOf:
+          - $ref: '#/components/schemas/PurposeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        newsletter_opt_in:
+          type: boolean
         password:
           type: string
           writeOnly: true
@@ -7658,6 +7832,16 @@ components:
       - must_change_password
       - role
       - username
+    VerifyEmail:
+      type: object
+      properties:
+        uid:
+          type: string
+        token:
+          type: string
+      required:
+      - token
+      - uid
     WorkflowStatusEnum:
       enum:
       - draft

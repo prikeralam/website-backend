@@ -23,3 +23,31 @@ class PasswordResetRateThrottle(LoginRateThrottle):
 
     scope = "password_reset"
     field = "email"
+
+
+class RegisterRateThrottle(LoginRateThrottle):
+    """Limits sign-ups per address, so the endpoint can't be used to flood an inbox."""
+
+    scope = "register"
+    field = "email"
+
+
+class RegisterGlobalRateThrottle(SimpleRateThrottle):
+    """A ceiling on all sign-ups together: they are posted by the frontend's server, which limits per visitor IP;
+    this caps the total if that is bypassed."""
+
+    scope = "register_global"
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {"scope": self.scope, "ident": "all"}
+
+
+class VerificationResendRateThrottle(SimpleRateThrottle):
+    """Limits confirmation emails per signed-in user."""
+
+    scope = "verification_resend"
+
+    def get_cache_key(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": request.user.pk}

@@ -5,7 +5,8 @@ from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
 
-from .models import AuditLog, Role, User
+from .models import AuditLog, Purpose, Role, User
+from .tokens import email_verification_token
 
 
 def check_password_strength(field, password, user):
@@ -28,8 +29,9 @@ class RoleUpdateSerializer(serializers.Serializer):
 class UserSerializer(serializers.ModelSerializer):
     """A user as admins see them, and as a user sees themselves at /users/me/.
 
-    Only contact details are writable here: the role has its own audited endpoint, `is_active` its
-    deactivate/reactivate actions, and passwords their own flows.
+    Only contact details and sign-up answers are writable here: the role has its own audited endpoint,
+    `is_active` its deactivate/reactivate actions, passwords their own flows, and `email_verified` changes
+    only through a confirmation link.
     """
 
     class Meta:
@@ -37,9 +39,11 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             "id", "username", "email", "first_name", "last_name", "role",
             "is_active", "must_change_password", "date_joined", "last_login",
+            "email_verified", "organisation", "purpose", "newsletter_opt_in",
         ]
         read_only_fields = [
             "id", "username", "role", "is_active", "must_change_password", "date_joined", "last_login",
+            "email_verified",
         ]
         extra_kwargs = {"email": {"required": True, "allow_blank": False}}
 
@@ -72,7 +76,8 @@ class UserCreateSerializer(UserSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
-        user = User(**validated_data)
+        # An admin vouches for the address, and the invite or reset link proves it anyway.
+        user = User(**validated_data, email_verified=True)
         if password:
             user.set_password(password)
             user.must_change_password = True
@@ -115,6 +120,44 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         check_password_strength("new_password", attrs["new_password"], user)
         attrs["user"] = user
         return attrs
+
+
+class RegisterSerializer(serializers.Serializer):
+    """A visitor's own sign-up. The email doubles as the username; `next` is where the confirmation link returns."""
+
+    email = serializers.EmailField(max_length=150)
+    password = serializers.CharField(write_only=True, max_length=128, style={"input_type": "password"})
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
+    organisation = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    purpose = serializers.ChoiceField(choices=Purpose.choices)
+    newsletter_opt_in = serializers.BooleanField(required=False, default=False)
+    next = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        attrs["email"] = attrs["email"].strip().lower()
+        candidate = User(username=attrs["email"], email=attrs["email"], first_name=attrs["first_name"])
+        check_password_strength("password", attrs["password"], candidate)
+        return attrs
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+
+    def validate(self, attrs):
+        try:
+            user = User.objects.get(pk=force_str(urlsafe_base64_decode(attrs["uid"])), is_active=True)
+        except (User.DoesNotExist, ValueError, TypeError, OverflowError):
+            user = None
+        if user is None or not email_verification_token.check_token(user, attrs["token"]):
+            raise serializers.ValidationError({"detail": "This link is invalid, has expired or has already been used."})
+        attrs["user"] = user
+        return attrs
+
+
+class ResendVerificationSerializer(serializers.Serializer):
+    next = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
