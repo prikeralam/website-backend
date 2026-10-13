@@ -116,6 +116,8 @@ CACHES = {
 # Custom user model (Module H)
 
 AUTH_USER_MODEL = "accounts.User"
+# Visitors sign in with their email; earlier staff accounts with their username (apps/accounts/backends.py).
+AUTHENTICATION_BACKENDS = ["apps.accounts.backends.EmailOrUsernameBackend"]
 
 
 # Password validation
@@ -193,6 +195,10 @@ REST_FRAMEWORK = {
         # POST /api/v1/apply/: per applicant address, and in total.
         "application": "3/hour",
         "application_global": env("APPLICATION_GLOBAL_RATE", default="60/hour"),
+        # Visitor sign-up (POST /api/v1/register/): per address and in total; confirmation emails per user.
+        "register": "5/hour",
+        "register_global": env("REGISTER_GLOBAL_RATE", default="200/hour"),
+        "verification_resend": "5/hour",
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,

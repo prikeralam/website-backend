@@ -17,19 +17,34 @@ from .serializers import (
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    RegisterSerializer,
+    ResendVerificationSerializer,
     RoleUpdateSerializer,
     UserCreateSerializer,
     UserSerializer,
+    VerifyEmailSerializer,
 )
-from .services import audit, guard_admin_lockout, send_password_email
-from .throttles import LoginRateThrottle, PasswordResetRateThrottle
+from .services import (
+    audit,
+    guard_admin_lockout,
+    send_existing_account_email,
+    send_password_email,
+    send_verification_email,
+)
+from .throttles import (
+    LoginRateThrottle,
+    PasswordResetRateThrottle,
+    RegisterGlobalRateThrottle,
+    RegisterRateThrottle,
+    VerificationResendRateThrottle,
+)
 
 MODULE_TAG = "Module H — Users & Roles"
 
 
 @extend_schema(tags=[MODULE_TAG])
 class LoginView(TokenObtainPairView):
-    """Exchanges a username and password for an access/refresh token pair.
+    """Exchanges a username or email address, and a password, for an access/refresh token pair.
 
     Throttled per username: the sixth attempt within a minute answers 429.
     """
@@ -233,7 +248,86 @@ class PasswordResetConfirmView(APIView):
         user = serializer.validated_data["user"]
         user.set_password(serializer.validated_data["new_password"])
         user.must_change_password = False
-        user.save(update_fields=["password", "must_change_password"])
+        # The link arrived by email, so the address is confirmed too.
+        user.email_verified = True
+        user.save(update_fields=["password", "must_change_password", "email_verified"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+SIGNUP_ANSWER = {"detail": "Check your inbox: we've sent you an email to finish signing up."}
+
+
+@extend_schema(tags=[MODULE_TAG])
+class RegisterView(APIView):
+    """A visitor creates their own account (role `public`) and is emailed a link to confirm their address.
+
+    Answers 202 the same way whether or not the address is new, so it can't reveal which addresses have
+    accounts: an existing account's owner is emailed a sign-in and reset link instead.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [RegisterRateThrottle, RegisterGlobalRateThrottle]
+
+    @extend_schema(request=RegisterSerializer, responses={202: None})
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        email = data["email"]
+        existing = User.objects.filter(Q(email__iexact=email) | Q(username__iexact=email)).first()
+        if existing is not None:
+            if existing.is_active and existing.email:
+                send_existing_account_email(existing)
+            return Response(SIGNUP_ANSWER, status=status.HTTP_202_ACCEPTED)
+        with transaction.atomic():
+            user = User(
+                username=email,
+                email=email,
+                first_name=data["first_name"].strip(),
+                last_name=data["last_name"].strip(),
+                organisation=data["organisation"].strip(),
+                purpose=data["purpose"],
+                newsletter_opt_in=data["newsletter_opt_in"],
+                role=Role.PUBLIC,
+            )
+            user.set_password(data["password"])
+            user.save()
+            audit(user, "user.registered", user, purpose=user.purpose)
+            transaction.on_commit(lambda: send_verification_email(user, data["next"]))
+        return Response(SIGNUP_ANSWER, status=status.HTTP_202_ACCEPTED)
+
+
+@extend_schema(tags=[MODULE_TAG])
+class VerifyEmailView(APIView):
+    """Confirms an address from an emailed link. Each link works once."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    @extend_schema(request=VerifyEmailSerializer, responses={204: None})
+    def post(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+        user.email_verified = True
+        user.save(update_fields=["email_verified"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@extend_schema(tags=[MODULE_TAG])
+class ResendVerificationView(APIView):
+    """Emails the signed-in user a new confirmation link, unless their address is already confirmed."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [VerificationResendRateThrottle]
+
+    @extend_schema(request=ResendVerificationSerializer, responses={204: None})
+    def post(self, request):
+        serializer = ResendVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if not request.user.email_verified and request.user.email:
+            send_verification_email(request.user, serializer.validated_data["next"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

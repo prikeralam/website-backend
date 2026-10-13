@@ -34,7 +34,8 @@ def can_download(user, dataset):
     if role in STAFF_ROLES:
         return True
     if dataset.visibility == "public":
-        return True
+        # Every download needs an account with a confirmed email, so PRI knows who uses its data.
+        return bool(user.is_authenticated and getattr(user, "email_verified", False))
     # on_request: an approved request belongs to a signed-in user, so anonymous visitors never qualify
     if not user.is_authenticated:
         return False
