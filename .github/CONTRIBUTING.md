@@ -117,10 +117,10 @@ start deployed with `DEBUG=True` or without a bucket.
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| `ci.yml` | every PR, push to `dev`, and called by both deploy workflows | `lint` (ruff), `test` (`manage.py check`, `makemigrations --check`, `migrate`, `test` on Postgres 16), `docker-build` (builds the image, boots it against Postgres with a real-looking `ALLOWED_HOSTS`, requests `/healthz/`, and waits for Docker to report it healthy) |
+| `ci.yml` | every PR, except docs/Markdown-only changes and the `dev` -> `staging` and `staging` -> `main` promotion PRs (their code already passed on its own PR) | `lint` (ruff), `test` (`manage.py check`, `makemigrations --check`, `migrate`, `test` on Postgres 16), `docker-build` (builds the image, boots it against Postgres with a real-looking `ALLOWED_HOSTS`, requests `/healthz/`, and waits for Docker to report it healthy) |
 | `pr-guard.yml` | PRs into `dev`, `staging`, `main` | `branch-flow` fails a PR whose source/target pair is not an allowed promotion path (section 1) |
-| `deploy-staging.yml` | push to `staging` | CI, then builds and pushes the image to GHCR, then deploys it to the staging EC2 host over SSH (`staging` Environment) |
-| `deploy-production.yml` | push to `main` | CI, then image, then SSH deploy (the host backs up its database before migrating), then git tag and GitHub Release (`production` Environment) |
+| `deploy-staging.yml` | push to `staging` | builds and pushes the image to GHCR, then deploys it to the staging EC2 host over SSH (`staging` Environment) |
+| `deploy-production.yml` | push to `main` | image, then SSH deploy (the host backs up its database before migrating), then git tag and GitHub Release (`production` Environment) |
 | `hotfix-backport.yml` | push to `main` from a `fix/*` PR | opens backport PRs into `staging` and `dev` |
 
 Images are tagged `sha-<commit>` and `tree-<git tree hash>`. A merge of
