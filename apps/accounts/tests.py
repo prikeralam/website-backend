@@ -173,6 +173,7 @@ class AdminOnlyTests(UserManagementTestCase):
             ("get", "/api/v1/users/stats/"),
             ("get", "/api/v1/users/export/"),
             ("get", f"/api/v1/users/{target}/downloads/"),
+            ("post", f"/api/v1/users/{target}/resend-verification/"),
         ]
         for method, url in endpoints:
             with self.subTest(method=method, url=url, caller="anonymous"):
@@ -649,3 +650,17 @@ class VisitorsAdminTests(UserManagementTestCase):
         self.assertTrue(lines[1].startswith("'=Rita"))  # a formula-like name can't run in Excel
         row = AuditLog.objects.get(action="users_export")
         self.assertEqual((row.actor, row.metadata["rows"], row.metadata["newsletter_only"]), (self.admin, 1, True))
+
+    def test_staff_filter_leaves_visitors_out(self):
+        client = self.as_admin()
+        staff = {u["role"] for u in client.get("/api/v1/users/?staff=true&page_size=100").json()["results"]}
+        self.assertNotIn("public", staff)
+        visitors = {u["role"] for u in client.get("/api/v1/users/?staff=false&page_size=100").json()["results"]}
+        self.assertEqual(visitors, {"public"})
+
+    def test_admin_can_resend_a_visitors_confirmation_once_needed(self):
+        client = self.as_admin()
+        self.assertEqual(client.post(f"/api/v1/users/{self.lurker.pk}/resend-verification/").status_code, 204)
+        self.assertEqual(mail.outbox[-1].to, ["lurker@example.org"])
+        self.assertEqual(client.post(f"/api/v1/users/{self.reader.pk}/resend-verification/").status_code, 400)
+        self.assertEqual(len(self.audit_rows("verification_resent")), 1)

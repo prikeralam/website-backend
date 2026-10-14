@@ -4239,6 +4239,10 @@ paths:
           * `editor` - Editor
           * `fellow` - Intern / Fellow
           * `admin` - Admin
+      - in: query
+        name: staff
+        schema:
+          type: boolean
       tags:
       - Module H — Users & Roles
       security:
@@ -4402,6 +4406,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
           description: ''
+  /api/v1/users/{id}/resend-verification/:
+    post:
+      operationId: v1_users_resend_verification_create
+      description: Emails the user a new confirmation link, e.g. when a visitor says
+        theirs never arrived.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - Module H — Users & Roles
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/users/{id}/role/:
     patch:
       operationId: v1_users_role_partial_update

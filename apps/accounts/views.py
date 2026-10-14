@@ -109,6 +109,11 @@ class UserFilter(django_filters.FilterSet):
 
     joined_after = django_filters.DateFilter(field_name="date_joined", lookup_expr="date__gte")
     joined_before = django_filters.DateFilter(field_name="date_joined", lookup_expr="date__lte")
+    # Staff accounts only (every role but the self-registered visitors), for the Users & Roles screen.
+    staff = django_filters.BooleanFilter(method="filter_staff")
+
+    def filter_staff(self, queryset, name, value):
+        return queryset.exclude(role=Role.PUBLIC) if value else queryset.filter(role=Role.PUBLIC)
 
     class Meta:
         model = User
@@ -207,6 +212,19 @@ class UserViewSet(
             return Response({"detail": "Reactivate the user first."}, status=status.HTTP_400_BAD_REQUEST)
         send_password_email(user)
         audit(request.user, "password_reset_sent", user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(request=None, responses={204: None})
+    @action(detail=True, methods=["post"], url_path="resend-verification")
+    def resend_verification(self, request, pk=None):
+        """Emails the user a new confirmation link, e.g. when a visitor says theirs never arrived."""
+        user = self.get_object()
+        if not user.is_active:
+            return Response({"detail": "Reactivate the user first."}, status=status.HTTP_400_BAD_REQUEST)
+        if user.email_verified:
+            return Response({"detail": "This email is already confirmed."}, status=status.HTTP_400_BAD_REQUEST)
+        send_verification_email(user, "/data")
+        audit(request.user, "verification_resent", user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(responses={200: dict})
