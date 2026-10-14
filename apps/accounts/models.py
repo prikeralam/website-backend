@@ -10,6 +10,18 @@ class Role(models.TextChoices):
     ADMIN = "admin", "Admin"
 
 
+class Purpose(models.TextChoices):
+    """Why a visitor signed up, asked once at sign-up so PRI can see who uses its data."""
+
+    RESEARCH = "research", "Research"
+    JOURNALISM = "journalism", "Journalism"
+    POLICY = "policy", "Policy or government"
+    TEACHING = "teaching", "Teaching or study"
+    BUSINESS = "business", "Business"
+    PERSONAL = "personal", "Personal interest"
+    OTHER = "other", "Other"
+
+
 class PRIUserManager(UserManager):
     def create_superuser(self, username, email=None, password=None, **extra_fields):
         # Admin-site rights follow the role (User.save), so a superuser has to be an admin.
@@ -21,6 +33,13 @@ class User(AbstractUser):
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.PUBLIC)
     # Set when an admin creates the account with a temporary password; cleared once the user sets their own.
     must_change_password = models.BooleanField(default=False)
+    # Self-registered visitors confirm their address by an emailed link before they can download data. Accounts
+    # made by an admin count as confirmed (their invite or reset link proves the address).
+    email_verified = models.BooleanField(default=False)
+    # Asked at sign-up; staff accounts usually leave them blank.
+    organisation = models.CharField(max_length=200, blank=True)
+    purpose = models.CharField(max_length=20, choices=Purpose.choices, blank=True)
+    newsletter_opt_in = models.BooleanField(default=False)
 
     objects = PRIUserManager()
 
