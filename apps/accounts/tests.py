@@ -178,6 +178,7 @@ class AdminOnlyTests(UserManagementTestCase):
             ("get", "/api/v1/users/export/"),
             ("get", f"/api/v1/users/{target}/downloads/"),
             ("post", f"/api/v1/users/{target}/resend-verification/"),
+            ("delete", f"/api/v1/users/{target}/"),
         ]
         for method, url in endpoints:
             with self.subTest(method=method, url=url, caller="anonymous"):
@@ -187,10 +188,48 @@ class AdminOnlyTests(UserManagementTestCase):
                     client = self.as_user(self.users[role])
                     self.assertEqual(getattr(client, method)(url, {}, format="json").status_code, 403)
 
-    def test_users_cannot_be_deleted_or_replaced(self):
+    def test_users_cannot_be_replaced(self):
         url = f"/api/v1/users/{self.users['public'].pk}/"
-        self.assertEqual(self.as_admin().delete(url).status_code, 405)
         self.assertEqual(self.as_admin().put(url, {}, format="json").status_code, 405)
+
+
+class DeleteUserTests(UserManagementTestCase):
+    def delete(self, user, client=None):
+        return (client or self.as_admin()).delete(f"/api/v1/users/{user.pk}/")
+
+    def test_admin_deletes_a_visitor_with_their_downloads_and_audits_it(self):
+        from apps.datarepo.models import DatasetDownload
+        from apps.taxonomy.models import Theme
+
+        visitor = get_user_model().objects.create_user(username="gone", email="gone@example.com", password="x-pass-123")
+        theme = Theme.objects.filter(parent__isnull=False).first() or Theme.objects.first()
+        dataset = Dataset.objects.create(
+            slug="d", title="D", status="published", visibility="public", format="csv",
+            sub_theme=theme, created_by=self.admin,
+        )
+        DatasetDownload.objects.create(user=visitor, dataset=dataset, format="csv")
+
+        self.assertEqual(self.delete(visitor).status_code, 204)
+        self.assertFalse(get_user_model().objects.filter(pk=visitor.pk).exists())
+        self.assertFalse(DatasetDownload.objects.exists())
+        [row] = self.audit_rows("user_delete")
+        self.assertEqual(
+            (row.actor, row.target, row.metadata["email"]), (self.admin, f"user:{visitor.pk}", "gone@example.com")
+        )
+
+    def test_refuses_the_admins_own_account(self):
+        # The deleting admin is always an active admin, so this also keeps the last admin.
+        self.assertEqual(self.delete(self.admin).status_code, 400)
+        self.assertTrue(get_user_model().objects.filter(pk=self.admin.pk).exists())
+
+    def test_refuses_an_account_that_created_content(self):
+        author = self.users["editor"]
+        ContentBlock.objects.create(slug="b", title="B", body="x", created_by=author)
+        response = self.delete(author)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Deactivate it instead", response.json()["detail"])
+        self.assertTrue(get_user_model().objects.filter(pk=author.pk).exists())
+        self.assertEqual(self.audit_rows("user_delete"), [])
 
 
 class ListAndDetailTests(UserManagementTestCase):

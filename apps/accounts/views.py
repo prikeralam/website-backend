@@ -1,6 +1,6 @@
 import django_filters
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, ProtectedError, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -137,9 +137,10 @@ class UserViewSet(
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
     mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
-    """Admin user management. Users are deactivated, never deleted: content keeps its author."""
+    """Admin user management. Deactivating keeps an account; deleting removes it (see `destroy`)."""
 
     queryset = User.objects.order_by("username")
     permission_classes = [IsAuthenticated, IsAdmin]
@@ -147,7 +148,7 @@ class UserViewSet(
     filterset_class = UserFilter
     ordering_fields = ["username", "email", "date_joined", "last_login"]
     pagination_class = UserPagination
-    http_method_names = ["get", "post", "patch", "head", "options"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     # Keeps /users/me/ and /users/me/role/ out of the `{id}` routes.
     lookup_value_regex = r"\d+"
 
@@ -191,6 +192,28 @@ class UserViewSet(
             user.save(update_fields=["is_active"])
             audit(request.user, "user_reactivate" if active else "user_deactivate", user)
         return Response(UserSerializer(user).data)
+
+    @extend_schema(responses={204: None})
+    def destroy(self, request, *args, **kwargs):
+        """Deletes an account for good, with its downloads and access requests (e.g. a visitor asking to be erased).
+
+        Refused for the admin's own account and the last active admin, and with 409 for anyone who created content
+        (publications, drafts, uploads), which keeps its author: deactivate those accounts instead. Audit rows the
+        user made stay, without the link to them; the deletion is audited with the username and email.
+        """
+        user = self.get_object()
+        guard_admin_lockout(request.user, user)
+        snapshot = {"username": user.username, "email": user.email, "role": user.role}
+        try:
+            with transaction.atomic():
+                audit(request.user, "user_delete", user, **snapshot)
+                user.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "This account created content on the site, so it can't be deleted. Deactivate it instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(request=None, responses=UserSerializer)
     @action(detail=True, methods=["post"])

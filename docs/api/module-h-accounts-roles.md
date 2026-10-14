@@ -25,7 +25,7 @@ Access is **per role, not per user**: "giving a user access" means setting their
 | `POST /api/v1/password-reset/confirm/` | Anonymous | `{"uid", "token", "new_password"}` → `204`. Completes both resets and invites. `400` for a used, expired (Django's `PASSWORD_RESET_TIMEOUT`, 3 days) or tampered link. |
 | `GET /api/v1/audit-log/?module=&actor=` | Admin | Cross-module audit trail, filterable by module and actor. |
 
-There is no `DELETE` or `PUT` on users (`405`). Users are deactivated, never deleted: content keeps its author (`WorkflowMixin.created_by` is `PROTECT`), and deleting a user would cascade away their access-request history.
+There is no `PUT` on users (`405`). `DELETE /users/{id}/` (admin) deletes an account for good, with its download records and access requests, e.g. when a visitor asks to be erased: `204`; `400` for the admin's own account; `409` for an account that created content, which keeps its author (`WorkflowMixin.created_by` is `PROTECT`), so deactivate those instead. Audit rows the user made stay, without the link to them, and the deletion is audited as `user_delete` with the username, email and role.
 
 ## Rules
 
