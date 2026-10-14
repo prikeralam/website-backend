@@ -3,7 +3,7 @@ import csv
 import io
 from datetime import timedelta
 
-from django.db.models import Count
+from django.db.models import Count, Min
 from django.db.models.functions import Lower, TruncWeek
 from django.utils import timezone
 
@@ -38,11 +38,12 @@ def visitor_stats(now=None):
         for row in visitors.values("purpose").annotate(n=Count("id")).order_by("-n", "purpose")
     ]
     organisations = [
-        {"organisation": row["name"], "count": row["n"]}
+        {"organisation": row["shown"], "count": row["n"]}
         for row in visitors.exclude(organisation="")
         .annotate(name=Lower("organisation"))
         .values("name")
-        .annotate(n=Count("id"))
+        # Grouped ignoring case; shown as a spelling visitors actually typed (capitalised ones sort first).
+        .annotate(n=Count("id"), shown=Min("organisation"))
         .order_by("-n", "name")[:8]
     ]
     downloads = DatasetDownload.objects.all()

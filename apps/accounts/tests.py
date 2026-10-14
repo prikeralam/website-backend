@@ -113,6 +113,10 @@ class TokenAuthTests(TestCase):
             self.login(username=" ALICE ", password="wrong")
         self.assertEqual(self.login().status_code, 429)
 
+    def test_login_records_last_login(self):
+        self.assertEqual(self.login().status_code, 200)
+        self.assertIsNotNone(get_user_model().objects.get(username="alice").last_login)
+
     def post(self, path, refresh):
         return self.client.post(path, {"refresh": refresh}, format="json").status_code
 
@@ -634,7 +638,7 @@ class VisitorsAdminTests(UserManagementTestCase):
         self.assertEqual((stats["visitors"]["confirmed"], stats["visitors"]["newsletter"]), (1, 1))
         self.assertEqual(len(stats["weekly_signups"]), 12)
         self.assertEqual(sum(w["count"] for w in stats["weekly_signups"]), 3)
-        self.assertEqual(stats["top_organisations"][0], {"organisation": "calicut university", "count": 2})
+        self.assertEqual(stats["top_organisations"][0], {"organisation": "Calicut University", "count": 2})
         self.assertIn({"purpose": "research", "label": "Research", "count": 1}, stats["purposes"])
         self.assertEqual(stats["downloads"]["total"], 1)
         self.assertEqual(stats["downloads"]["top_datasets"], [{"slug": "open-ds", "title": "Open data", "count": 1}])
