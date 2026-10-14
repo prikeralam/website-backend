@@ -172,6 +172,9 @@ elif DEPLOYED:
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
+# Sign-in through POST /api/v1/token/ records last_login, which the admin's Visitors and Users screens show.
+SIMPLE_JWT = {"UPDATE_LAST_LOGIN": True}
+
 # Django REST Framework
 
 REST_FRAMEWORK = {

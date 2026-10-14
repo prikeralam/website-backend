@@ -152,6 +152,25 @@ class AccessRequest(models.Model):
         return f"{self.user} -> {self.dataset} ({self.status})"
 
 
+class DatasetDownload(models.Model):
+    """A download link issued to a signed-in user by `/download/`, so admins can see who uses which data.
+
+    It records that a link was handed out, not that the file's bytes were fetched: the file itself is served by storage.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="dataset_downloads")
+    dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE, related_name="downloads")
+    format = models.CharField(max_length=20)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["dataset", "created_at"])]
+
+    def __str__(self):
+        return f"{self.user} downloaded {self.dataset} ({self.format})"
+
+
 class Collection(WorkflowMixin):
     """A named bundle of related datasets, for example everything behind one data story."""
 
