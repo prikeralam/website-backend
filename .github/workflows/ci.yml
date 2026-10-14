@@ -1,10 +1,13 @@
 name: CI
 
+# Checks run once per change, on its pull request. Not again on the push to dev (the squash merge of a
+# green PR), not for docs-only changes, and not on the dev -> staging and staging -> main promotion PRs,
+# whose code already passed on its own PR. Hotfix and backport PRs are checked as usual.
 on:
   pull_request:
-  push:
-    branches: [dev]
-  workflow_call:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
 
 permissions:
   contents: read
@@ -15,6 +18,9 @@ concurrency:
 
 jobs:
   lint:
+    if: >-
+      !((github.base_ref == 'staging' && github.head_ref == 'dev') ||
+      (github.base_ref == 'main' && github.head_ref == 'staging'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +33,9 @@ jobs:
       - run: ruff check .
 
   test:
+    if: >-
+      !((github.base_ref == 'staging' && github.head_ref == 'dev') ||
+      (github.base_ref == 'main' && github.head_ref == 'staging'))
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -61,6 +70,9 @@ jobs:
       - run: python manage.py test
 
   docker-build:
+    if: >-
+      !((github.base_ref == 'staging' && github.head_ref == 'dev') ||
+      (github.base_ref == 'main' && github.head_ref == 'staging'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
