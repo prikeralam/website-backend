@@ -1,15 +1,23 @@
+import django_filters
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
+from django.http import HttpResponse
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.filters import OrderingFilter
 from rest_framework.generics import ListAPIView
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenBlacklistView, TokenObtainPairView
 
+from apps.datarepo.models import DatasetDownload
+
+from .insights import users_csv, visitor_stats
 from .models import AuditLog, Role, User
 from .serializers import (
     AuditLogSerializer,
@@ -96,6 +104,23 @@ class UserRoleUpdateView(APIView):
         return Response(MyRoleSerializer(target_user).data)
 
 
+class UserFilter(django_filters.FilterSet):
+    """Filters for the admin user list and its CSV export."""
+
+    joined_after = django_filters.DateFilter(field_name="date_joined", lookup_expr="date__gte")
+    joined_before = django_filters.DateFilter(field_name="date_joined", lookup_expr="date__lte")
+
+    class Meta:
+        model = User
+        fields = ["role", "is_active", "email_verified", "purpose", "newsletter_opt_in"]
+
+
+class UserPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
 @extend_schema(tags=[MODULE_TAG])
 @extend_schema_view(
     list=extend_schema(
@@ -113,8 +138,10 @@ class UserViewSet(
 
     queryset = User.objects.order_by("username")
     permission_classes = [IsAuthenticated, IsAdmin]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ["role", "is_active"]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = UserFilter
+    ordering_fields = ["username", "email", "date_joined", "last_login"]
+    pagination_class = UserPagination
     http_method_names = ["get", "post", "patch", "head", "options"]
     # Keeps /users/me/ and /users/me/role/ out of the `{id}` routes.
     lookup_value_regex = r"\d+"
@@ -123,7 +150,7 @@ class UserViewSet(
         return UserCreateSerializer if self.action == "create" else UserSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().annotate(download_count=Count("dataset_downloads"))
         term = self.request.query_params.get("q", "").strip()
         if term:
             queryset = queryset.filter(
@@ -181,6 +208,48 @@ class UserViewSet(
         send_password_email(user)
         audit(request.user, "password_reset_sent", user)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(responses={200: dict})
+    @action(detail=False, methods=["get"])
+    def stats(self, request):
+        """Visitor totals, weekly sign-ups for 12 weeks, purposes, top organisations, and dataset downloads."""
+        return Response(visitor_stats())
+
+    @extend_schema(
+        parameters=[OpenApiParameter("newsletter_only", bool, description="Only accounts that asked for updates.")],
+        responses={(200, "text/csv"): str},
+    )
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """The filtered list as a CSV file (same filters and search as the list). Every export is audited."""
+        users = self.filter_queryset(self.get_queryset())
+        newsletter_only = request.query_params.get("newsletter_only") in ("1", "true", "True")
+        if newsletter_only:
+            users = users.filter(newsletter_opt_in=True, is_active=True)
+        rows = users.count()
+        filters = {k: v for k, v in request.query_params.items() if k not in ("page", "page_size")}
+        AuditLog.objects.create(
+            actor=request.user, module="accounts", action="users_export", target="users:export",
+            metadata={"filters": filters, "rows": rows, "newsletter_only": newsletter_only},
+        )
+        name = "pri-newsletter" if newsletter_only else "pri-users"
+        response = HttpResponse(users_csv(users), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{name}-{timezone.localdate().isoformat()}.csv"'
+        response["Cache-Control"] = "no-store"
+        return response
+
+    @extend_schema(responses={200: dict})
+    @action(detail=True, methods=["get"])
+    def downloads(self, request, pk=None):
+        """The user's 100 most recent dataset downloads, newest first."""
+        user = self.get_object()
+        rows = DatasetDownload.objects.filter(user=user).select_related("dataset")[:100]
+        return Response(
+            [
+                {"dataset": d.dataset.slug, "title": d.dataset.title, "format": d.format, "at": d.created_at}
+                for d in rows
+            ]
+        )
 
 
 @extend_schema(tags=[MODULE_TAG])

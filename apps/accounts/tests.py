@@ -170,6 +170,9 @@ class AdminOnlyTests(UserManagementTestCase):
             ("post", f"/api/v1/users/{target}/reactivate/"),
             ("post", f"/api/v1/users/{target}/send-password-reset/"),
             ("patch", f"/api/v1/users/{target}/role/"),
+            ("get", "/api/v1/users/stats/"),
+            ("get", "/api/v1/users/export/"),
+            ("get", f"/api/v1/users/{target}/downloads/"),
         ]
         for method, url in endpoints:
             with self.subTest(method=method, url=url, caller="anonymous"):
@@ -205,7 +208,7 @@ class ListAndDetailTests(UserManagementTestCase):
                 set(row),
                 {"id", "username", "email", "first_name", "last_name", "role",
                  "is_active", "must_change_password", "date_joined", "last_login",
-                 "email_verified", "organisation", "purpose", "newsletter_opt_in"},
+                 "email_verified", "organisation", "purpose", "newsletter_opt_in", "download_count"},
             )
 
     def test_me_is_not_mistaken_for_a_user_id(self):
@@ -569,3 +572,80 @@ class VisitorSignupTests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.assertTrue(get_user_model().objects.get(username="newbie").email_verified)
+
+
+class VisitorsAdminTests(UserManagementTestCase):
+    """Issue #111: visitor filters, figures, the CSV export and per-user downloads."""
+
+    def setUp(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from apps.datarepo.models import Dataset
+        from apps.taxonomy.models import Theme
+
+        User = get_user_model()
+        self.reader = User.objects.create_user(
+            username="reader@example.org", email="reader@example.org", password="x-long-pass-1", role="public",
+            first_name="=Rita", organisation="Calicut University", purpose="research",
+            newsletter_opt_in=True, email_verified=True,
+        )
+        self.lurker = User.objects.create_user(
+            username="lurker@example.org", email="lurker@example.org", password="x-long-pass-1", role="public",
+            organisation="calicut university", purpose="journalism",
+        )
+        theme = Theme.objects.filter(parent__isnull=False).first() or Theme.objects.first()
+        self.dataset = Dataset.objects.create(
+            slug="open-ds", title="Open data", status="published", visibility="public", format="csv",
+            sub_theme=theme, created_by=self.admin, file=SimpleUploadedFile("open.csv", b"a,b\n1,2\n"),
+        )
+
+    def download(self, user):
+        return self.as_user(user).get("/api/v1/datasets/open-ds/download/")
+
+    def test_downloads_are_recorded_for_accounts_only(self):
+        from apps.datarepo.models import DatasetDownload
+
+        self.assertEqual(self.download(self.reader).status_code, 200)
+        self.assertEqual(self.download(self.lurker).status_code, 403)  # email not confirmed
+        self.assertEqual(APIClient().get("/api/v1/datasets/open-ds/download/").status_code, 403)
+        recorded = list(DatasetDownload.objects.values_list("user__email", "format"))
+        self.assertEqual(recorded, [("reader@example.org", "csv")])
+        rows = self.as_admin().get(f"/api/v1/users/{self.reader.pk}/downloads/").json()
+        self.assertEqual([(r["dataset"], r["format"]) for r in rows], [("open-ds", "csv")])
+
+    def test_list_filters_and_orders_visitors(self):
+        client = self.as_admin()
+        base = "/api/v1/users/?role=public"
+        names = lambda q: [u["username"] for u in client.get(base + q).json()["results"]]  # noqa: E731
+        self.assertEqual(set(names("")), {"public_user", "reader@example.org", "lurker@example.org"})
+        self.assertEqual(names("&email_verified=true&newsletter_opt_in=true"), ["reader@example.org"])
+        self.assertEqual(names("&purpose=journalism"), ["lurker@example.org"])
+        self.download(self.reader)
+        rows = client.get(base + "&ordering=-date_joined&page_size=2").json()
+        self.assertEqual(len(rows["results"]), 2)
+        counts = {u["username"]: u["download_count"] for u in client.get(base).json()["results"]}
+        self.assertEqual(counts["reader@example.org"], 1)
+
+    def test_stats_count_visitors_purposes_organisations_and_downloads(self):
+        self.download(self.reader)
+        stats = self.as_admin().get("/api/v1/users/stats/").json()
+        self.assertEqual(stats["visitors"]["total"], 3)
+        self.assertEqual((stats["visitors"]["confirmed"], stats["visitors"]["newsletter"]), (1, 1))
+        self.assertEqual(len(stats["weekly_signups"]), 12)
+        self.assertEqual(sum(w["count"] for w in stats["weekly_signups"]), 3)
+        self.assertEqual(stats["top_organisations"][0], {"organisation": "calicut university", "count": 2})
+        self.assertIn({"purpose": "research", "label": "Research", "count": 1}, stats["purposes"])
+        self.assertEqual(stats["downloads"]["total"], 1)
+        self.assertEqual(stats["downloads"]["top_datasets"], [{"slug": "open-ds", "title": "Open data", "count": 1}])
+
+    def test_export_is_csv_safe_for_spreadsheets_and_audited(self):
+        response = self.as_admin().get("/api/v1/users/export/?role=public&newsletter_only=true")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response["Content-Type"].startswith("text/csv"))
+        self.assertIn("pri-newsletter-", response["Content-Disposition"])
+        lines = response.content.decode("utf-8-sig").strip().splitlines()
+        self.assertTrue(lines[0].startswith("Name,Email,Organisation"))
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[1].startswith("'=Rita"))  # a formula-like name can't run in Excel
+        row = AuditLog.objects.get(action="users_export")
+        self.assertEqual((row.actor, row.metadata["rows"], row.metadata["newsletter_only"]), (self.admin, 1, True))

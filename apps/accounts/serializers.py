@@ -27,6 +27,13 @@ class RoleUpdateSerializer(serializers.Serializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    download_count = serializers.SerializerMethodField()
+
+    def get_download_count(self, obj) -> int:
+        # The admin list annotates it; a single profile (e.g. /users/me/) counts on demand.
+        annotated = getattr(obj, "download_count", None)
+        return annotated if annotated is not None else obj.dataset_downloads.count()
+
     """A user as admins see them, and as a user sees themselves at /users/me/.
 
     Only contact details and sign-up answers are writable here: the role has its own audited endpoint,
@@ -39,7 +46,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             "id", "username", "email", "first_name", "last_name", "role",
             "is_active", "must_change_password", "date_joined", "last_login",
-            "email_verified", "organisation", "purpose", "newsletter_opt_in",
+            "email_verified", "organisation", "purpose", "newsletter_opt_in", "download_count",
         ]
         read_only_fields = [
             "id", "username", "role", "is_active", "must_change_password", "date_joined", "last_login",

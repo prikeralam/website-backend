@@ -15,7 +15,7 @@ from apps.workflow.permissions import STAFF_ROLES, CanSubmitDraft
 from apps.workflow.views import WorkflowViewSetMixin
 
 from .geo import GeoJSONError, GeoJSONTooLarge, load_geojson
-from .models import AccessRequest, Collection, Dashboard, Dataset, DatasetFile
+from .models import AccessRequest, Collection, Dashboard, Dataset, DatasetDownload, DatasetFile
 from .permissions import can_download, can_edit_dataset, visible_datasets_for
 from .previews import PreviewError, UnsupportedFormat, table_page
 from .serializers import (
@@ -125,11 +125,16 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
             return Response({"detail": "You do not have access to download this dataset."}, status=403)
         wanted = request.query_params.get("format")
         if not wanted or wanted == dataset.format:
-            return Response({"file": request.build_absolute_uri(dataset.file.url)})
-        extra = dataset.extra_files.filter(format=wanted).first()
-        if extra is None:
-            return Response({"detail": f"This dataset has no '{wanted}' file."}, status=404)
-        return Response({"file": request.build_absolute_uri(extra.file.url)})
+            url, fmt = dataset.file.url, dataset.format
+        else:
+            extra = dataset.extra_files.filter(format=wanted).first()
+            if extra is None:
+                return Response({"detail": f"This dataset has no '{wanted}' file."}, status=404)
+            url, fmt = extra.file.url, extra.format
+        # Every link handed to an account is recorded, so admins can see who uses which data.
+        if request.user.is_authenticated:
+            DatasetDownload.objects.create(user=request.user, dataset=dataset, format=fmt)
+        return Response({"file": request.build_absolute_uri(url)})
 
     def _editable_dataset(self, request):
         dataset = self.get_object()

@@ -4159,15 +4159,65 @@ paths:
         keeps its author.'
       parameters:
       - in: query
+        name: email_verified
+        schema:
+          type: boolean
+      - in: query
         name: is_active
         schema:
           type: boolean
+      - in: query
+        name: joined_after
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: joined_before
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: newsletter_opt_in
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
       - name: page
         required: false
         in: query
         description: A page number within the paginated result set.
         schema:
           type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: purpose
+        schema:
+          type: string
+          enum:
+          - business
+          - journalism
+          - other
+          - personal
+          - policy
+          - research
+          - teaching
+        description: |-
+          * `research` - Research
+          * `journalism` - Journalism
+          * `policy` - Policy or government
+          * `teaching` - Teaching or study
+          * `business` - Business
+          * `personal` - Personal interest
+          * `other` - Other
       - in: query
         name: q
         schema:
@@ -4306,6 +4356,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
           description: ''
+  /api/v1/users/{id}/downloads/:
+    get:
+      operationId: v1_users_downloads_retrieve
+      description: The user's 100 most recent dataset downloads, newest first.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - Module H — Users & Roles
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/users/{id}/reactivate/:
     post:
       operationId: v1_users_reactivate_create
@@ -4379,6 +4452,28 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/users/export/:
+    get:
+      operationId: v1_users_export_retrieve
+      description: The filtered list as a CSV file (same filters and search as the
+        list). Every export is audited.
+      parameters:
+      - in: query
+        name: newsletter_only
+        schema:
+          type: boolean
+        description: Only accounts that asked for updates.
+      tags:
+      - Module H — Users & Roles
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            text/csv:
+              schema:
+                type: string
+          description: ''
   /api/v1/users/me/:
     get:
       operationId: v1_users_me_retrieve
@@ -4479,6 +4574,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MyRole'
+          description: ''
+  /api/v1/users/stats/:
+    get:
+      operationId: v1_users_stats_retrieve
+      description: Visitor totals, weekly sign-ups for 12 weeks, purposes, top organisations,
+        and dataset downloads.
+      tags:
+      - Module H — Users & Roles
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/v1/verify-email/:
     post:
@@ -7037,12 +7149,6 @@ components:
           readOnly: true
     PatchedUser:
       type: object
-      description: |-
-        A user as admins see them, and as a user sees themselves at /users/me/.
-
-        Only contact details and sign-up answers are writable here: the role has its own audited endpoint,
-        `is_active` its deactivate/reactivate actions, passwords their own flows, and `email_verified` changes
-        only through a confirmation link.
       properties:
         id:
           type: integer
@@ -7097,6 +7203,9 @@ components:
           - $ref: '#/components/schemas/BlankEnum'
         newsletter_opt_in:
           type: boolean
+        download_count:
+          type: integer
+          readOnly: true
     PersonProfile:
       type: object
       properties:
@@ -7694,12 +7803,6 @@ components:
       - refresh
     User:
       type: object
-      description: |-
-        A user as admins see them, and as a user sees themselves at /users/me/.
-
-        Only contact details and sign-up answers are writable here: the role has its own audited endpoint,
-        `is_active` its deactivate/reactivate actions, passwords their own flows, and `email_verified` changes
-        only through a confirmation link.
       properties:
         id:
           type: integer
@@ -7754,8 +7857,12 @@ components:
           - $ref: '#/components/schemas/BlankEnum'
         newsletter_opt_in:
           type: boolean
+        download_count:
+          type: integer
+          readOnly: true
       required:
       - date_joined
+      - download_count
       - email
       - email_verified
       - id
@@ -7820,11 +7927,15 @@ components:
           - $ref: '#/components/schemas/BlankEnum'
         newsletter_opt_in:
           type: boolean
+        download_count:
+          type: integer
+          readOnly: true
         password:
           type: string
           writeOnly: true
       required:
       - date_joined
+      - download_count
       - email
       - id
       - is_active
