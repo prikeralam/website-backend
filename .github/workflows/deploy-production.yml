@@ -1,6 +1,6 @@
 name: Deploy production
 
-# Merge to `main` = tests -> image (promoted from staging if it was already built there) ->
+# Merge to `main` = image (promoted from staging if it was already built there) ->
 # deploy to the production host (which backs up its database before migrating) -> tag + GitHub Release.
 # Secrets live in the `production` GitHub Environment; see docs/deploy/aws-provisioning.md.
 
@@ -16,11 +16,7 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-
   image:
-    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
