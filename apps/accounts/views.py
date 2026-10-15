@@ -1,4 +1,6 @@
 import django_filters
+from django.conf import settings
+from django.contrib.auth.models import update_last_login
 from django.db import transaction
 from django.db.models import Count, ProtectedError, Q
 from django.http import HttpResponse
@@ -13,14 +15,19 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenBlacklistView, TokenObtainPairView
 
 from apps.datarepo.models import DatasetDownload
 
+from .google import GoogleUnavailable, InvalidGoogleToken, verify_google_credential
 from .insights import users_csv, visitor_stats
 from .models import AuditLog, Role, User
 from .serializers import (
     AuditLogSerializer,
+    GoogleLoginSerializer,
     MyRoleSerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
@@ -40,6 +47,7 @@ from .services import (
     send_verification_email,
 )
 from .throttles import (
+    GoogleLoginGlobalRateThrottle,
     LoginRateThrottle,
     PasswordResetRateThrottle,
     RegisterGlobalRateThrottle,
@@ -58,6 +66,72 @@ class LoginView(TokenObtainPairView):
     """
 
     throttle_classes = [LoginRateThrottle]
+
+
+@extend_schema(tags=[MODULE_TAG])
+class GoogleLoginView(APIView):
+    """Exchanges a "Sign in with Google" ID token for the same access/refresh pair as `/token/`.
+
+    The token must be signed by Google for this site's client ID and carry a verified address. An active account
+    with that address (or username) is signed in; otherwise a visitor account is created, already confirmed and
+    with no password. Answers 404 while `GOOGLE_CLIENT_ID` is unset, 401 for a token it can't accept or an
+    inactive account, and 503 when Google's keys can't be fetched.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [GoogleLoginGlobalRateThrottle]
+
+    @extend_schema(request=GoogleLoginSerializer, responses={200: TokenObtainPairSerializer})
+    def post(self, request):
+        if not settings.GOOGLE_CLIENT_ID:
+            return Response({"detail": "Google sign-in isn't enabled."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = GoogleLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            claims = verify_google_credential(serializer.validated_data["credential"])
+        except InvalidGoogleToken:
+            return Response(
+                {"detail": "Google sign-in failed. Please try again."}, status=status.HTTP_401_UNAUTHORIZED
+            )
+        except GoogleUnavailable:
+            return Response(
+                {"detail": "Google sign-in is unavailable right now."}, status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        email = claims["email"].strip().lower()
+        with transaction.atomic():
+            matches = Q(email__iexact=email) | Q(username__iexact=email)
+            user = User.objects.select_for_update().filter(matches).first()
+            if user is None:
+                user = User(
+                    username=email,
+                    email=email,
+                    first_name=(claims.get("given_name") or claims.get("name") or "")[:150],
+                    last_name=(claims.get("family_name") or "")[:150],
+                    role=Role.PUBLIC,
+                    email_verified=True,
+                )
+                user.set_unusable_password()
+                user.save()
+                audit(user, "user.registered", user, via="google")
+            elif not user.is_active:
+                return Response(
+                    {"detail": "This account has been deactivated."}, status=status.HTTP_401_UNAUTHORIZED
+                )
+            else:
+                if not user.email_verified:
+                    if user.role == Role.PUBLIC:
+                        # A self-registered address nobody had confirmed may have been signed up by someone else,
+                        # with a password they know: Google proves who owns it, so that password and its sessions go.
+                        user.set_unusable_password()
+                        for outstanding in OutstandingToken.objects.filter(user=user):
+                            BlacklistedToken.objects.get_or_create(token=outstanding)
+                    user.email_verified = True
+                    user.save(update_fields=["password", "email_verified"])
+            update_last_login(None, user)
+        refresh = RefreshToken.for_user(user)
+        return Response({"access": str(refresh.access_token), "refresh": str(refresh)})
 
 
 @extend_schema(tags=[MODULE_TAG])

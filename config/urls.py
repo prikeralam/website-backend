@@ -10,7 +10,7 @@ from drf_spectacular.utils import extend_schema
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from apps.accounts.views import LoginView, LogoutView
+from apps.accounts.views import GoogleLoginView, LoginView, LogoutView
 
 from .health import healthz
 
@@ -22,6 +22,7 @@ urlpatterns = [
     path("healthz/", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path("api/v1/token/", LoginView.as_view(), name="token_obtain_pair"),
+    path("api/v1/token/google/", GoogleLoginView.as_view(), name="token_google"),
     path("api/v1/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/v1/token/logout/", LogoutView.as_view(), name="token_logout"),
     path("api/v1/", include("apps.accounts.urls")),
