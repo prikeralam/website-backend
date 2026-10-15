@@ -148,6 +148,12 @@ class RegisterSerializer(serializers.Serializer):
         return attrs
 
 
+class GoogleLoginSerializer(serializers.Serializer):
+    """The ID token ("credential") that Google Identity Services gives the browser."""
+
+    credential = serializers.CharField(max_length=4096)
+
+
 class VerifyEmailSerializer(serializers.Serializer):
     uid = serializers.CharField()
     token = serializers.CharField()

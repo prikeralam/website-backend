@@ -707,3 +707,137 @@ class VisitorsAdminTests(UserManagementTestCase):
         self.assertEqual(mail.outbox[-1].to, ["lurker@example.org"])
         self.assertEqual(client.post(f"/api/v1/users/{self.reader.pk}/resend-verification/").status_code, 400)
         self.assertEqual(len(self.audit_rows("verification_resent")), 1)
+
+
+GOOGLE_TEST_CLIENT = "test-client.apps.googleusercontent.com"
+
+
+@override_settings(GOOGLE_CLIENT_ID=GOOGLE_TEST_CLIENT)
+class GoogleLoginTests(TestCase):
+    """Tokens are signed with a local key standing in for Google's, which the key lookup is patched to return."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        cls.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        cls.other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    def setUp(self):
+        from unittest import mock
+
+        signing_key = mock.Mock(key=self.private_key.public_key())
+        patcher = mock.patch("apps.accounts.google._keys.get_signing_key_from_jwt", return_value=signing_key)
+        self.get_key = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.client = APIClient()
+
+    def credential(self, key=None, **overrides):
+        import time
+
+        import jwt
+
+        now = int(time.time())
+        claims = {
+            "iss": "https://accounts.google.com",
+            "aud": GOOGLE_TEST_CLIENT,
+            "sub": "1234567890",
+            "email": "Reader@Example.com",
+            "email_verified": True,
+            "given_name": "Asha",
+            "family_name": "Menon",
+            "iat": now,
+            "exp": now + 600,
+        }
+        claims.update(overrides)
+        claims = {k: v for k, v in claims.items() if v is not None}
+        return jwt.encode(claims, key or self.private_key, algorithm="RS256", headers={"kid": "test"})
+
+    def post(self, credential):
+        return self.client.post("/api/v1/token/google/", {"credential": credential}, format="json")
+
+    def test_creates_a_confirmed_visitor_with_no_password(self):
+        response = self.post(self.credential())
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
+        user = get_user_model().objects.get(email="reader@example.com")
+        self.assertEqual(
+            (user.username, user.role, user.first_name, user.last_name),
+            ("reader@example.com", "public", "Asha", "Menon"),
+        )
+        self.assertTrue(user.email_verified)
+        self.assertFalse(user.has_usable_password())
+        self.assertIsNotNone(user.last_login)
+        registered = AuditLog.objects.filter(action="user.registered", target=f"user:{user.pk}", metadata__via="google")
+        self.assertTrue(registered.exists())
+
+    def test_the_tokens_open_the_account(self):
+        access = self.post(self.credential()).data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        me = self.client.get("/api/v1/users/me/")
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.data["email"], "reader@example.com")
+
+    def test_signs_in_an_existing_account_by_email_and_keeps_its_password(self):
+        staff = get_user_model().objects.create_user(
+            username="asha", email="reader@example.com", password="Pri-Pass-9123", role="editor"
+        )
+        response = self.post(self.credential())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(get_user_model().objects.count(), 1)
+        staff.refresh_from_db()
+        self.assertTrue(staff.check_password("Pri-Pass-9123"))
+        self.assertTrue(staff.email_verified)
+        self.assertEqual(staff.role, "editor")
+
+    def test_takes_over_an_unconfirmed_visitor_sign_up(self):
+        # Someone signed up with this address and a password of their own, and never confirmed it.
+        squatter = get_user_model().objects.create_user(
+            username="reader@example.com", email="reader@example.com", password="Squat-Pass-9123", role="public"
+        )
+        signed_in = self.client.post(
+            "/api/v1/token/", {"username": "reader@example.com", "password": "Squat-Pass-9123"}, format="json"
+        )
+        old_refresh = signed_in.data["refresh"]
+        self.assertEqual(self.post(self.credential()).status_code, 200)
+        squatter.refresh_from_db()
+        self.assertFalse(squatter.has_usable_password())
+        self.assertTrue(squatter.email_verified)
+        refreshed = self.client.post("/api/v1/token/refresh/", {"refresh": old_refresh}, format="json")
+        self.assertEqual(refreshed.status_code, 401)
+
+    def test_refuses_a_deactivated_account(self):
+        get_user_model().objects.create_user(
+            username="gone", email="reader@example.com", password="Pri-Pass-9123", is_active=False
+        )
+        self.assertEqual(self.post(self.credential()).status_code, 401)
+
+    def test_refuses_tokens_it_cannot_trust(self):
+        cases = {
+            "another site's client": self.credential(aud="someone-else.apps.googleusercontent.com"),
+            "an unverified address": self.credential(email_verified=False),
+            "a missing verification flag": self.credential(email_verified=None),
+            "an expired token": self.credential(iat=1, exp=2),
+            "another issuer": self.credential(iss="https://evil.example.com"),
+            "a forged signature": self.credential(key=self.other_key),
+            "not a token": "not-a-jwt",
+        }
+        for case, credential in cases.items():
+            with self.subTest(case):
+                self.assertEqual(self.post(credential).status_code, 401)
+        self.assertFalse(get_user_model().objects.exists())
+
+    def test_answers_503_when_googles_keys_cannot_be_fetched(self):
+        import jwt
+
+        self.get_key.side_effect = jwt.PyJWKClientConnectionError("timed out")
+        self.assertEqual(self.post(self.credential()).status_code, 503)
+
+    def test_requires_a_credential(self):
+        self.assertEqual(self.client.post("/api/v1/token/google/", {}, format="json").status_code, 400)
+
+    @override_settings(GOOGLE_CLIENT_ID="")
+    def test_is_off_until_a_client_id_is_configured(self):
+        self.assertEqual(self.post(self.credential()).status_code, 404)
