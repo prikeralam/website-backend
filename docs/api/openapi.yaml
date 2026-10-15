@@ -4099,7 +4099,11 @@ paths:
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenObtainPair'
+          description: ''
   /api/v1/token/logout/:
     post:
       operationId: v1_token_logout_create

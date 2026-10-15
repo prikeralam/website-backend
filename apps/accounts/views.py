@@ -15,6 +15,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenBlacklistView, TokenObtainPairView
@@ -81,7 +82,7 @@ class GoogleLoginView(APIView):
     authentication_classes = []
     throttle_classes = [GoogleLoginGlobalRateThrottle]
 
-    @extend_schema(request=GoogleLoginSerializer, responses={200: None})
+    @extend_schema(request=GoogleLoginSerializer, responses={200: TokenObtainPairSerializer})
     def post(self, request):
         if not settings.GOOGLE_CLIENT_ID:
             return Response({"detail": "Google sign-in isn't enabled."}, status=status.HTTP_404_NOT_FOUND)
