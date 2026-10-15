@@ -202,6 +202,9 @@ REST_FRAMEWORK = {
         "register": "5/hour",
         "register_global": env("REGISTER_GLOBAL_RATE", default="200/hour"),
         "verification_resend": "5/hour",
+        # Sign in with Google (POST /api/v1/token/google/): a ceiling on all of them together, since every one is
+        # posted by the frontend's server; the Google signature is what actually guards it.
+        "google_login_global": env("GOOGLE_LOGIN_GLOBAL_RATE", default="300/hour"),
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -260,6 +263,8 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="PRI <no-reply@localhost>
 CONTACT_EMAIL = env("CONTACT_EMAIL", default="contact@priresearch.in")
 # Where emailed links point: the frontend owns the /reset-password page.
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000").rstrip("/")
+# The OAuth client ID that "Sign in with Google" tokens must be issued for. Unset turns Google sign-in off.
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
 
 
 # CORS — allow the companion Next.js frontend's dev server
