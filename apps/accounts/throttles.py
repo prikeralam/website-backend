@@ -42,6 +42,12 @@ class RegisterGlobalRateThrottle(SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": "all"}
 
 
+class GoogleLoginGlobalRateThrottle(RegisterGlobalRateThrottle):
+    """A ceiling on all Google sign-ins together, for the same reason as sign-ups."""
+
+    scope = "google_login_global"
+
+
 class VerificationResendRateThrottle(SimpleRateThrottle):
     """Limits confirmation emails per signed-in user."""
 

@@ -4071,6 +4071,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/TokenObtainPair'
           description: ''
+  /api/v1/token/google/:
+    post:
+      operationId: v1_token_google_create
+      description: |-
+        Exchanges a "Sign in with Google" ID token for the same access/refresh pair as `/token/`.
+
+        The token must be signed by Google for this site's client ID and carry a verified address. An active account
+        with that address (or username) is signed in; otherwise a visitor account is created, already confirmed and
+        with no password. Answers 404 while `GOOGLE_CLIENT_ID` is unset, 401 for a token it can't accept or an
+        inactive account, and 503 when Google's keys can't be fetched.
+      tags:
+      - Module H — Users & Roles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleLogin'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GoogleLogin'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GoogleLogin'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
   /api/v1/token/logout/:
     post:
       operationId: v1_token_logout_create
@@ -5513,6 +5542,16 @@ components:
         * `in_person` - In person
         * `online` - Online
         * `hybrid` - Hybrid
+    GoogleLogin:
+      type: object
+      description: The ID token ("credential") that Google Identity Services gives
+        the browser.
+      properties:
+        credential:
+          type: string
+          maxLength: 4096
+      required:
+      - credential
     GroupEnum:
       enum:
       - team

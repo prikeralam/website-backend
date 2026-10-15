@@ -11,6 +11,7 @@ Access is **per role, not per user**: "giving a user access" means setting their
 | Method & Path | Auth | Description |
 |---|---|---|
 | `POST /api/v1/token/`, `/token/refresh/`, `/token/logout/` | Anonymous | Sign in (throttled 5/min per username, `429` beyond), renew the access token, sign out (blacklists the refresh token). See [README.md](README.md#authentication). |
+| `POST /api/v1/token/google/` | Anonymous | Sign in with Google: `{credential}` (the ID token from Google Identity Services) for the same `{access, refresh}` as `/token/`. The token must be RS256-signed by Google for `GOOGLE_CLIENT_ID`, unexpired, with `email_verified`. An active account whose email or username matches is signed in (an unconfirmed self-registered visitor account loses its password and sessions first, since Google proves who owns the address); otherwise a confirmed visitor account with no password is created (`user.registered`, `via: google`). `401` for a token it can't accept or a deactivated account, `503` when Google's keys can't be fetched, `404` while `GOOGLE_CLIENT_ID` is unset; 300/hour in total. |
 | `GET /api/v1/users/me/role/` | Authenticated | Current user's id/email/role, for frontend conditional rendering. |
 | `GET`, `PATCH /api/v1/users/me/` | Authenticated | Own profile. `PATCH` accepts `email`, `first_name`, `last_name` only. |
 | `POST /api/v1/users/me/password/` | Authenticated | `{"old_password", "new_password"}` → `204`. Clears `must_change_password`. |
