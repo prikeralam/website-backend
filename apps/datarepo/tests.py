@@ -8,7 +8,7 @@ from unittest import mock
 import pyarrow as pa
 import pyarrow.parquet as pq
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
+from django.test import TransactionTestCase, override_settings
 from rest_framework.test import APITestCase
 
 from apps.taxonomy.models import Theme
@@ -643,3 +643,287 @@ class DatasetFormatsTests(APITestCase):
         path = Dataset.objects.get(slug="plus-one").extra_files.get().file.path
         Dataset.objects.get(slug="plus-one").delete()
         self.assertFalse(os.path.exists(path))
+
+
+# PRI Data Framework publishing (website-backend #123: B1 fields, B2 publish gate, B3 two-person rule).
+class DatasetPublishingFrameworkTests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.pipeline = User.objects.create_user(username="pri-pipeline", password="pw12345", role="researcher")
+        self.qa = User.objects.create_user(username="qa", password="pw12345", role="editor")
+        self.lead = User.objects.create_user(username="lead", password="pw12345", role="editor")
+        education = Theme.objects.get(slug="education")
+        self.sub_theme = Theme.objects.create(slug="school-education", name="School Education", parent=education)
+
+    def framework_fields(self):
+        return {
+            "code": "PRI-EDU-0002",
+            "version": "1.0.0",
+            "summary": "SSLC results by district",
+            "description": "Results of the March 2026 SSLC exam.",
+            "keywords": [" SSLC ", "exam results"],
+            "source_publisher": "KITE / Pareeksha Bhavan",
+            "source_document": "Saphalam results analysis",
+            "source_url": "https://result.kite.kerala.gov.in/analysis/",
+            "archived_url": "https://web.archive.org/web/2026/https://result.kite.kerala.gov.in/analysis/",
+            "retrieval_date": "2026-10-15",
+            "source_tier": "1",
+            "collection_method": "administrative",
+            "source_terms": "Not stated",
+            "geography": "Kerala",
+            "granularity": "District x management",
+            "time_period": "2025-26",
+            "period_type": "academic_year",
+            "update_frequency": "Annual",
+            "methodology": "1. Fetched. 2. Checked.",
+            "known_limitations": "Only the latest exam.",
+            "steward": "Data steward",
+            "contact": "data@example.org",
+            "lgd_levels": ["district"],
+            "quality_grade": "A",
+            "column_dictionary": [{"name": "a", "label": "A"}, {"name": "b", "label": "B", "unit": "students"}],
+            "qa_report": {"passed": True, "grade_proposed": "A", "checks": []},
+            "provenance": {"pipeline_repo": "pri-data", "git_sha": "abc"},
+        }
+
+    def create_as_pipeline(self, **extra):
+        self.client.force_authenticate(self.pipeline)
+        payload = {
+            "slug": "sslc-results", "title": "SSLC results", "format": "csv", "sub_theme": self.sub_theme.pk,
+            "file": SimpleUploadedFile("sslc.csv", b"a,b\n1,2\n"),
+        }
+        payload.update({k: json.dumps(v) if isinstance(v, (dict, list)) else v
+                        for k, v in {**self.framework_fields(), **extra}.items()
+                        if k not in ("keywords", "lgd_levels")})
+        response = self.client.post("/api/v1/datasets/", payload, format="multipart")
+        self.assertEqual(response.status_code, 201, response.data)
+        # list fields go as JSON (multipart can't carry a list cleanly), like the pipeline's PATCH will
+        lists = {k: v for k, v in self.framework_fields().items() if k in ("keywords", "lgd_levels")}
+        response = self.client.patch("/api/v1/datasets/sslc-results/", lists, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        return Dataset.objects.get(slug="sslc-results")
+
+    def move(self, user, target, slug="sslc-results"):
+        self.client.force_authenticate(user)
+        return self.client.post(f"/api/v1/datasets/{slug}/transition/", {"status": target}, format="json")
+
+    def complete_checklist(self, user=None):
+        from .models import QA_CHECKLIST_ITEMS
+
+        self.client.force_authenticate(user or self.qa)
+        return self.client.patch(
+            "/api/v1/datasets/sslc-results/", {"qa_checklist": {k: True for k, _ in QA_CHECKLIST_ITEMS}}, format="json"
+        )
+
+    def ready_for_publishing(self):
+        dataset = self.create_as_pipeline()
+        self.assertEqual(self.move(self.pipeline, "in_review").status_code, 200)
+        self.assertEqual(self.complete_checklist().status_code, 200)
+        self.assertEqual(self.move(self.qa, "approved").status_code, 200)
+        return dataset
+
+    # ------------------------------------------------------------------ B1
+    def test_fields_round_trip_and_read_only_fields_are_ignored(self):
+        dataset = self.create_as_pipeline()
+        self.assertEqual(dataset.code, "PRI-EDU-0002")
+        self.assertEqual(dataset.keywords, ["SSLC", "exam results"])
+        self.assertEqual(dataset.license, "CC-BY-4.0")
+        self.client.force_authenticate(self.qa)
+        data = self.client.get("/api/v1/datasets/sslc-results/").data
+        for field in ("summary", "source_tier", "period_type", "column_dictionary", "qa_report", "provenance"):
+            self.assertEqual(data[field], json.loads(json.dumps(self.framework_fields()[field])))
+        self.assertEqual(len(data["qa_checklist_items"]), 11)
+        self.client.force_authenticate(self.pipeline)
+        self.client.patch("/api/v1/datasets/sslc-results/", {"approved_by": self.lead.pk}, format="json")
+        self.assertIsNone(Dataset.objects.get(slug="sslc-results").approved_by)
+
+    def test_blank_code_is_stored_as_null_so_several_datasets_have_none(self):
+        self.create_as_pipeline(code="")
+        self.assertIsNone(Dataset.objects.get(slug="sslc-results").code)
+
+    def test_field_validation(self):
+        self.create_as_pipeline()
+        cases = {
+            "code": "EDU-2", "version": "1.0", "source_url": "http://example.org", "source_tier": "5",
+            "keywords": ["ok", " "], "column_dictionary": [{"name": "a"}],
+        }
+        for field, bad in cases.items():
+            response = self.client.patch("/api/v1/datasets/sslc-results/", {field: bad}, format="json")
+            self.assertEqual(response.status_code, 400, field)
+            self.assertIn(field, response.data)
+        response = self.client.patch(
+            "/api/v1/datasets/sslc-results/", {"column_dictionary": [{"name": "zzz", "label": "Z"}]}, format="json"
+        )
+        self.assertIn("Not columns of the file: zzz", str(response.data))
+
+    def test_only_editors_write_the_qa_checklist(self):
+        self.create_as_pipeline()
+        response = self.client.patch("/api/v1/datasets/sslc-results/", {"qa_checklist": {"totals": True}},
+                                     format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.complete_checklist().status_code, 200)
+        self.client.force_authenticate(self.qa)
+        response = self.client.patch("/api/v1/datasets/sslc-results/", {"qa_checklist": {"nonsense": True}},
+                                     format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_filters_and_search(self):
+        self.create_as_pipeline()
+        self.client.force_authenticate(self.qa)
+        self.assertEqual(self.client.get("/api/v1/datasets/?code=PRI-EDU-0002").data["count"], 1)
+        self.assertEqual(self.client.get("/api/v1/datasets/?source_tier=2").data["count"], 0)
+        self.assertEqual(self.client.get("/api/v1/datasets/?quality_grade=A").data["count"], 1)
+        self.assertEqual(self.client.get("/api/v1/datasets/?q=district").data["count"], 1)    # summary
+        self.assertEqual(self.client.get("/api/v1/datasets/?q=exam%20results").data["count"], 1)  # keywords
+        self.assertEqual(self.client.get("/api/v1/datasets/?q=rainfall").data["count"], 0)
+
+    # ------------------------------------------------------------------ B2
+    def test_complete_approved_dataset_publishes(self):
+        self.ready_for_publishing()
+        response = self.move(self.lead, "published")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(Dataset.objects.get(slug="sslc-results").status, "published")
+
+    def test_gate_names_each_missing_field(self):
+        dataset = self.ready_for_publishing()
+        Dataset.objects.filter(pk=dataset.pk).update(steward="", archived_url="")
+        response = self.move(self.lead, "published")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("archived_url, steward", response.data["detail"])
+
+    def test_gate_refusals(self):
+        dataset = self.ready_for_publishing()
+        for change, phrase in [
+            ({"source_tier": "4"}, "tier 4"),
+            ({"column_dictionary": [{"name": "a", "label": "A"}]}, "no label in the column dictionary: b"),
+            ({"qa_report": {"passed": False}}, "QA report has not passed"),
+            ({"qa_checklist": {"totals": True}}, "QA checklist is not complete"),
+            ({"qa_checklist": {}}, "QA checklist is not complete"),
+        ]:
+            Dataset.objects.filter(pk=dataset.pk).update(**change)
+            response = self.move(self.lead, "published")
+            self.assertEqual(response.status_code, 400, change)
+            self.assertIn(phrase, response.data["detail"])
+            self.ready_state(dataset)
+
+    def ready_state(self, dataset):
+        from .models import QA_CHECKLIST_ITEMS
+
+        fields = self.framework_fields()
+        Dataset.objects.filter(pk=dataset.pk).update(
+            source_tier="1", column_dictionary=fields["column_dictionary"], qa_report=fields["qa_report"],
+            qa_checklist={k: True for k, _ in QA_CHECKLIST_ITEMS},
+        )
+
+    def test_publishing_only_from_approved(self):
+        self.create_as_pipeline()
+        self.move(self.pipeline, "in_review")
+        self.complete_checklist()
+        response = self.move(self.lead, "published")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("approved first", response.data["detail"])
+
+    def test_old_published_dataset_stays_published_and_editable(self):
+        old = Dataset.objects.create(
+            slug="old", title="Old", file=SimpleUploadedFile("old.csv", b"a\n1\n"), format="csv",
+            sub_theme=self.sub_theme, visibility="public", status="published", created_by=self.lead,
+        )
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get("/api/v1/datasets/old/").status_code, 200)
+        self.client.force_authenticate(self.qa)
+        response = self.client.patch("/api/v1/datasets/old/", {"title": "Old, renamed"}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Dataset.objects.get(pk=old.pk).status, "published")
+
+    def test_an_edit_cannot_empty_a_required_field_of_a_published_dataset(self):
+        self.ready_for_publishing()
+        self.move(self.lead, "published")
+        self.client.force_authenticate(self.qa)
+        response = self.client.patch("/api/v1/datasets/sslc-results/", {"methodology": ""}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("methodology", response.data)
+
+    # ------------------------------------------------------------------ B3
+    def test_creator_cannot_approve(self):
+        self.client.force_authenticate(self.qa)
+        response = self.client.post("/api/v1/datasets/", {
+            "slug": "by-editor", "title": "By editor", "format": "csv", "sub_theme": self.sub_theme.pk,
+            "file": SimpleUploadedFile("e.csv", b"a\n1\n"),
+        }, format="multipart")
+        self.assertEqual(response.status_code, 201)
+        self.move(self.qa, "in_review", slug="by-editor")
+        response = self.move(self.qa, "approved", slug="by-editor")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("another editor has to approve", response.data["detail"])
+
+    def test_approver_cannot_publish_but_a_second_editor_can(self):
+        self.ready_for_publishing()
+        dataset = Dataset.objects.get(slug="sslc-results")
+        self.assertEqual(dataset.approved_by, self.qa)
+        self.assertIsNotNone(dataset.approved_at)
+        response = self.move(self.qa, "published")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "You approved this dataset, so another editor has to publish it.")
+        self.assertEqual(self.move(self.lead, "published").status_code, 200)
+
+    def test_returning_to_draft_clears_the_approval(self):
+        self.ready_for_publishing()
+        self.assertEqual(self.move(self.lead, "draft").status_code, 200)
+        dataset = Dataset.objects.get(slug="sslc-results")
+        self.assertIsNone(dataset.approved_by)
+        self.assertIsNone(dataset.approved_at)
+
+    def test_the_pipeline_cannot_approve_or_publish(self):
+        self.create_as_pipeline()
+        self.move(self.pipeline, "in_review")
+        self.assertEqual(self.move(self.pipeline, "approved").status_code, 403)
+        self.assertEqual(self.move(self.pipeline, "published").status_code, 403)
+
+    def test_every_transition_is_audited_with_three_different_actors(self):
+        from apps.accounts.models import AuditLog
+
+        dataset = self.ready_for_publishing()
+        self.move(self.lead, "published")
+        logs = AuditLog.objects.filter(action="status_transition", target=f"dataset:{dataset.pk}").order_by("id")
+        self.assertEqual(
+            [(log.actor.username, log.metadata["new_status"]) for log in logs],
+            [("pri-pipeline", "in_review"), ("qa", "approved"), ("lead", "published")],
+        )
+
+
+class DatasetFrameworkMigrationTests(TransactionTestCase):
+    """0009 adds every field as optional: existing datasets keep their values, stay published, get no license."""
+
+    migrate_from = [("datarepo", "0008_dataset_download")]
+    migrate_to = [("datarepo", "0009_dataset_publishing_framework")]
+
+    def test_existing_rows_survive(self):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_from)
+        old_apps = executor.loader.project_state(self.migrate_from).apps
+        from django.contrib.auth import get_user_model
+
+        DatasetOld = old_apps.get_model("datarepo", "Dataset")
+        # Only datarepo is rolled back, so the user and theme tables are the current ones.
+        user = get_user_model().objects.create_user(username="old-admin", password="pw12345", role="admin")
+        sub = Theme.objects.create(slug="old-sub", name="Old sub", parent=Theme.objects.get(slug="health"))
+        DatasetOld.objects.create(slug="kept", title="Kept", file="datasets/kept.csv", format="csv",
+                                  sub_theme_id=sub.pk, status="published", visibility="public", source="Census",
+                                  created_by_id=user.pk)
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(self.migrate_to)
+        new_apps = executor.loader.project_state(self.migrate_to).apps
+        kept = new_apps.get_model("datarepo", "Dataset").objects.get(slug="kept")
+        self.assertEqual((kept.status, kept.source, kept.title), ("published", "Census", "Kept"))
+        self.assertEqual((kept.license, kept.code, kept.keywords, kept.qa_report), ("", None, [], {}))
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())

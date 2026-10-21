@@ -1,4 +1,5 @@
 import django_filters
+from django.db.models import CharField, F, Func, Q, Value
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -11,11 +12,21 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
 from apps.accounts.models import AuditLog
+from apps.workflow.models import WorkflowStatus
 from apps.workflow.permissions import STAFF_ROLES, CanSubmitDraft
 from apps.workflow.views import WorkflowViewSetMixin
 
 from .geo import GeoJSONError, GeoJSONTooLarge, load_geojson
-from .models import AccessRequest, Collection, Dashboard, Dataset, DatasetDownload, DatasetFile
+from .models import (
+    PUBLISH_REQUIRED_FIELDS,
+    QA_CHECKLIST_ITEMS,
+    AccessRequest,
+    Collection,
+    Dashboard,
+    Dataset,
+    DatasetDownload,
+    DatasetFile,
+)
 from .permissions import can_download, can_edit_dataset, visible_datasets_for
 from .previews import PreviewError, UnsupportedFormat, table_page
 from .serializers import (
@@ -43,7 +54,27 @@ class DatasetFilter(django_filters.FilterSet):
     class Meta:
         model = Dataset
         # "theme" isn't a real model field — it's the explicitly declared filter above.
-        fields = ["sub_theme", "geography", "year"]
+        fields = ["sub_theme", "geography", "year", "code", "source_tier", "quality_grade"]
+
+
+class DatasetSearchFilter(filters.SearchFilter):
+    """`?q=` over title, description, summary and keywords (every term must match one of them).
+
+    `keywords` is a Postgres array, which DRF's SearchFilter can't search, so it is searched as joined text."""
+
+    def filter_queryset(self, request, queryset, view):
+        terms = self.get_search_terms(request)
+        if not terms:
+            return queryset
+        queryset = queryset.annotate(
+            keywords_text=Func(F("keywords"), Value(" "), function="array_to_string", output_field=CharField())
+        )
+        for term in terms:
+            queryset = queryset.filter(
+                Q(title__icontains=term) | Q(description__icontains=term) | Q(summary__icontains=term)
+                | Q(keywords_text__icontains=term)
+            )
+        return queryset
 
 
 @extend_schema(tags=[MODULE_TAG])
@@ -52,12 +83,55 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
     serializer_class = DatasetSerializer
     permission_classes = [IsAuthenticatedOrReadOnly, CanSubmitDraft]
     lookup_field = "slug"
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filter_backends = [DjangoFilterBackend, DatasetSearchFilter]
     filterset_class = DatasetFilter
-    search_fields = ["title", "description"]
+    search_fields = ["title", "description", "summary", "keywords"]
 
     def get_queryset(self):
-        return visible_datasets_for(self.request.user, super().get_queryset()).prefetch_related("extra_files")
+        return visible_datasets_for(self.request.user, super().get_queryset()).prefetch_related(
+            "extra_files", "related_publications"
+        )
+
+    def publish_blocker(self, obj):
+        """The PRI Data Framework's publishing gate: one sentence naming everything still missing."""
+        problems = []
+        if obj.status != WorkflowStatus.APPROVED:
+            problems.append(f"it must be approved first (it is {obj.get_status_display().lower()})")
+        empty = [name for name in PUBLISH_REQUIRED_FIELDS if getattr(obj, name) in (None, "")]
+        if empty:
+            problems.append("these fields are empty: " + ", ".join(empty))
+        if obj.source_tier == "4":
+            problems.append("tier 4 sources (news, unverified files) are never published")
+        labelled = {e.get("name") for e in obj.column_dictionary or [] if str(e.get("label") or "").strip()}
+        unlabelled = [c for c in obj.columns or [] if c not in labelled]
+        if unlabelled:
+            problems.append("these columns have no label in the column dictionary: " + ", ".join(unlabelled))
+        if (obj.qa_report or {}).get("passed") is not True:
+            problems.append("the automated QA report has not passed (run `pri publish --check`)")
+        checklist = obj.qa_checklist or {}
+        open_items = [key for key, _ in QA_CHECKLIST_ITEMS if checklist.get(key) is not True]
+        if open_items:
+            problems.append("the QA checklist is not complete (open: " + ", ".join(open_items) + ")")
+        if not problems:
+            return None
+        return "This dataset can't be published yet: " + "; ".join(problems) + "."
+
+    def transition_blocker(self, obj, target, user):
+        # Two-person rule: whoever created a dataset doesn't approve it, and whoever approved it doesn't publish it.
+        if target == WorkflowStatus.APPROVED and obj.created_by_id == user.id:
+            return "You created this dataset, so another editor has to approve it."
+        if target == WorkflowStatus.PUBLISHED and obj.approved_by_id == user.id:
+            return "You approved this dataset, so another editor has to publish it."
+        return super().transition_blocker(obj, target, user)
+
+    def after_transition(self, obj, previous, target, user):
+        if target == WorkflowStatus.APPROVED:
+            obj.approved_by, obj.approved_at = user, timezone.now()
+        elif target in (WorkflowStatus.DRAFT, WorkflowStatus.IN_REVIEW):
+            obj.approved_by, obj.approved_at = None, None
+        else:
+            return
+        obj.save(update_fields=["approved_by", "approved_at"])
 
     def filter_queryset(self, queryset):
         # DjangoFilterBackend/SearchFilter apply to the list action only — see the matching
