@@ -29,6 +29,16 @@ class WorkflowViewSetMixin:
         """Why `obj` can't be published yet, or None. Content types with publishing requirements override this."""
         return None
 
+    def transition_blocker(self, obj, target, user):
+        """Why `user` can't move `obj` to `target`, or None. Defaults to the publish requirements; content types with
+        rules for other moves (e.g. who may approve) override this."""
+        if target == WorkflowStatus.PUBLISHED:
+            return self.publish_blocker(obj)
+        return None
+
+    def after_transition(self, obj, previous, target, user):
+        """Called after a successful transition, before the audit row is written. Default: nothing."""
+
     @action(detail=True, methods=["post"], url_path="transition")
     def transition(self, request, *args, **kwargs):
         # Imported here (not at module level) to avoid a circular import:
@@ -41,10 +51,9 @@ class WorkflowViewSetMixin:
         serializer.is_valid(raise_exception=True)
         target_status = serializer.validated_data["status"]
         previous_status = obj.status
-        if target_status == WorkflowStatus.PUBLISHED:
-            blocker = self.publish_blocker(obj)
-            if blocker:
-                return Response({"detail": blocker}, status=status.HTTP_400_BAD_REQUEST)
+        blocker = self.transition_blocker(obj, target_status, request.user)
+        if blocker:
+            return Response({"detail": blocker}, status=status.HTTP_400_BAD_REQUEST)
 
         update_fields = ["status", "reviewed_by", "updated_at"]
         obj.status = target_status
@@ -53,6 +62,7 @@ class WorkflowViewSetMixin:
             obj.published_at = timezone.now()
             update_fields.append("published_at")
         obj.save(update_fields=update_fields)
+        self.after_transition(obj, previous_status, target_status, request.user)
 
         AuditLog.objects.create(
             actor=request.user,

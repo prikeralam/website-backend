@@ -68,6 +68,49 @@ with one description, citation and access level, whatever formats it comes in.
   dataset deletes its extra files from storage too.
 - The system doesn't check that the formats hold the same data; the counts shown are the main file's.
 
+## Publishing framework (#123)
+
+Datasets follow the PRI Data Framework (pri-data `docs/FRAMEWORK.md`, build spec `docs/PUBLISHING_PLAN.md` B1-B3).
+Their data and metadata come from pri-data's catalog through `pri publish`, which logs in as the `pri-pipeline`
+account (role `researcher`) and can only create, edit its own drafts and move them to `in_review`.
+
+**Fields** (migration `datarepo.0009`; all optional in the database, so older datasets stay valid; existing datasets
+get an empty `license`, new ones default to `CC-BY-4.0`):
+
+- Identity and text: `code` (permanent ID `PRI-XXX-NNNN`, unique; blank is stored as `null`), `version` (semver),
+  `summary` (one sentence), `keywords` (at most 12, trimmed), `methodology`, `known_limitations`.
+- Source: `source_publisher` (front ends prefer it over the older `source`), `source_document`, `source_url` (https
+  only), `archived_url`, `retrieval_date`, `source_tier` (`1`, `2`, `3`, `4`, `P`), `collection_method`
+  (`administrative`, `census`, `sample_survey`, `rti`, `pri_primary`, `compiled`), `source_terms`.
+- Coverage: `period_type` (`calendar_year`, `fiscal_year`, `academic_year`, `survey_year`, `snapshot`, `other`),
+  `next_update`, `lgd_levels` (levels that carry LGD codes, e.g. `district`).
+- `quality_grade` (`A`/`B`/`C`, proposed by `pri publish`, confirmed by QA), `license` (`CC-BY-4.0`,
+  `CC-BY-NC-4.0`, `GODL-India`, `ODbL-1.0`, `other`), `steward`, `contact` (e-mail), `related_publications`
+  (publication slugs).
+- `column_dictionary`: `[{name, label, description, data_type, unit, allowed_values, null_meaning, source_column,
+  derived_formula}]`; `name` and `label` required, names unique and, once the file is profiled, real columns.
+- `provenance` (pipeline repo, git SHA, run ids, file hashes) and `qa_report` (`pri publish --check` output:
+  `{passed, grade_proposed, checks}`), written by the pipeline.
+- `qa_checklist`: `{item key: true/false}` for the manual QA checklist; written by editors and admins only.
+  `qa_checklist_items` (read-only) lists the keys with their labels, in order, for the review screen.
+- `approved_by`, `approved_at` (read-only): set on the move to `approved`, cleared on a move back to `draft` or
+  `in_review`.
+- Filters: `code`, `source_tier`, `quality_grade`. `?q=` also searches `summary` and `keywords`.
+
+**Publish gate** (`DatasetViewSet.publish_blocker`): `approved -> published` answers 400 with one sentence naming
+everything missing when the dataset is not `approved`; any of `code, version, title, summary, description, sub_theme,
+source_publisher, source_url, archived_url, retrieval_date, source_tier, collection_method, geography, granularity,
+time_period, period_type, update_frequency, methodology, known_limitations, license, steward, quality_grade` is
+empty; `source_tier` is `4`; a profiled column has no labelled `column_dictionary` entry; `qa_report.passed` is not
+`true`; or any `qa_checklist` item is not done. Datasets published before the gate stay published; an edit that
+empties a required field of a published dataset is refused (fields that were never filled can stay empty).
+
+**Two-person rule** (`transition_blocker`, shared by every workflow type through `WorkflowViewSetMixin`): the
+creator of a dataset can't approve it ("You created this dataset, so another editor has to approve it.") and the
+approver can't publish it ("You approved this dataset, so another editor has to publish it."). So a pipeline
+dataset is submitted, approved and published by three accounts, each an audit-log row. `after_transition` is the
+matching hook for side effects; publications keep their cover rule through `publish_blocker`.
+
 ## Collections
 
 `GET/POST /api/v1/collections/`, `/collections/{slug}/` (workflowed, as datasets): a named bundle of related datasets, for example everything behind one data story. `datasets` is a list of dataset slugs and `publication` an optional publication slug, both written by slug. Each caller sees only the datasets it could open itself: the same workflow and visibility-tier rules as the dataset endpoints, so a collection never reveals a draft or internal dataset, not even its slug.
