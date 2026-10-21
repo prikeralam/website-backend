@@ -421,6 +421,8 @@ class DatasetFileStatsTests(APITestCase):
 
         cases = [
             ("csv-ds.csv", b"x,y\n1,2\n3,4\n", "csv", 2, ["x", "y"]),
+            # Excel and pri-data write UTF-8 with a byte-order mark; it must not end up in the first column name
+            ("bom-ds.csv", "﻿ജില്ല,y\n1,2\n".encode(), "csv", 1, ["ജില്ല", "y"]),
             ("parquet-ds.parquet", parquet.getvalue(), "parquet", 2, ["district", "seats"]),
             ("zip-ds.zip", archive.getvalue(), "zip", 3, ["a", "b", "c"]),
             ("geo-ds.geojson", geojson, "geojson", 2, ["district", "value", "note"]),
