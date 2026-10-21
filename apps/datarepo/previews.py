@@ -14,8 +14,13 @@ class UnsupportedFormat(Exception):
     """No table previewer exists for the dataset's format."""
 
 
+# utf-8-sig drops the byte-order mark Excel and pri-data put at the start of a UTF-8 CSV (so Malayalam opens correctly
+# in Excel); without it the first column name would start with "﻿". Files without a BOM read the same.
+CSV_ENCODING = "utf-8-sig"
+
+
 def _csv_page(stream, start, page_size):
-    reader = csv.reader(io.TextIOWrapper(stream, encoding="utf-8"))
+    reader = csv.reader(io.TextIOWrapper(stream, encoding=CSV_ENCODING))
     try:
         header = next(reader, [])
         return header, list(islice(reader, start, start + page_size))
@@ -87,7 +92,7 @@ def table_page(dataset, page, page_size):
 
 
 def _count_csv(stream):
-    reader = csv.reader(io.TextIOWrapper(stream, encoding="utf-8"))
+    reader = csv.reader(io.TextIOWrapper(stream, encoding=CSV_ENCODING))
     header = next(reader, [])
     return sum(1 for _ in reader), header
 

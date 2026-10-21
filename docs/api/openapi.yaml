@@ -1048,6 +1048,10 @@ paths:
         updates the object, and writes an AuditLog row.
       parameters:
       - in: query
+        name: code
+        schema:
+          type: string
+      - in: query
         name: geography
         schema:
           type: string
@@ -1063,6 +1067,34 @@ paths:
         description: A search term.
         schema:
           type: string
+      - in: query
+        name: quality_grade
+        schema:
+          type: string
+          enum:
+          - A
+          - B
+          - C
+        description: |-
+          * `A` - A
+          * `B` - B
+          * `C` - C
+      - in: query
+        name: source_tier
+        schema:
+          type: string
+          enum:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - P
+        description: |-
+          * `1` - 1 Official producer
+          * `2` - 2 Official, second-hand or RTI
+          * `3` - 3 Research or civil society
+          * `4` - 4 Unverified
+          * `P` - P PRI
       - in: query
         name: sub_theme
         schema:
@@ -4951,6 +4983,22 @@ components:
       - status
       - title
       - updated_at
+    CollectionMethodEnum:
+      enum:
+      - administrative
+      - census
+      - sample_survey
+      - rti
+      - pri_primary
+      - compiled
+      type: string
+      description: |-
+        * `administrative` - Administrative
+        * `census` - Census
+        * `sample_survey` - Sample survey
+        * `rti` - RTI reply
+        * `pri_primary` - PRI primary data
+        * `compiled` - Compiled
     ContactMessage:
       type: object
       description: A message as staff see it. Only `status` can be changed.
@@ -5230,6 +5278,118 @@ components:
           type: integer
           readOnly: true
           nullable: true
+        code:
+          type: string
+          nullable: true
+          description: Permanent dataset ID, e.g. PRI-EDU-0012 (from pri-data's catalog).
+            Blank means none.
+          maxLength: 20
+        version:
+          type: string
+          maxLength: 20
+        summary:
+          type: string
+          maxLength: 200
+        keywords:
+          type: array
+          items:
+            type: string
+            maxLength: 60
+        source_publisher:
+          type: string
+          maxLength: 200
+        source_document:
+          type: string
+          maxLength: 300
+        source_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 500
+          - type: string
+            maxLength: 0
+        archived_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 500
+          - type: string
+            maxLength: 0
+        retrieval_date:
+          type: string
+          format: date
+          nullable: true
+        source_tier:
+          oneOf:
+          - $ref: '#/components/schemas/SourceTierEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        collection_method:
+          oneOf:
+          - $ref: '#/components/schemas/CollectionMethodEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        source_terms:
+          type: string
+          maxLength: 300
+        period_type:
+          oneOf:
+          - $ref: '#/components/schemas/PeriodTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        next_update:
+          type: string
+          maxLength: 60
+        methodology:
+          type: string
+        known_limitations:
+          type: string
+        lgd_levels:
+          type: array
+          items:
+            type: string
+            maxLength: 30
+        quality_grade:
+          oneOf:
+          - $ref: '#/components/schemas/QualityGradeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        license:
+          oneOf:
+          - $ref: '#/components/schemas/LicenseEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        steward:
+          type: string
+          maxLength: 120
+        contact:
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        related_publications:
+          type: array
+          items:
+            type: string
+          description: Publications that use this dataset, by slug.
+        column_dictionary: {}
+        provenance: {}
+        qa_report: {}
+        qa_checklist: {}
+        qa_checklist_items:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+          description: 'The manual QA checklist: the keys `qa_checklist` takes, with
+            their labels, in order.'
+        approved_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
@@ -5255,6 +5415,8 @@ components:
           readOnly: true
           nullable: true
       required:
+      - approved_at
+      - approved_by
       - column_count
       - columns
       - created_at
@@ -5266,6 +5428,7 @@ components:
       - formats
       - id
       - published_at
+      - qa_checklist_items
       - reviewed_by
       - row_count
       - slug
@@ -5671,6 +5834,20 @@ components:
       - slug
       - title
       - type
+    LicenseEnum:
+      enum:
+      - CC-BY-4.0
+      - CC-BY-NC-4.0
+      - GODL-India
+      - ODbL-1.0
+      - other
+      type: string
+      description: |-
+        * `CC-BY-4.0` - CC BY 4.0
+        * `CC-BY-NC-4.0` - CC BY-NC 4.0
+        * `GODL-India` - GODL-India
+        * `ODbL-1.0` - ODbL 1.0
+        * `other` - Other
     Mention:
       type: object
       properties:
@@ -6577,6 +6754,118 @@ components:
           type: integer
           readOnly: true
           nullable: true
+        code:
+          type: string
+          nullable: true
+          description: Permanent dataset ID, e.g. PRI-EDU-0012 (from pri-data's catalog).
+            Blank means none.
+          maxLength: 20
+        version:
+          type: string
+          maxLength: 20
+        summary:
+          type: string
+          maxLength: 200
+        keywords:
+          type: array
+          items:
+            type: string
+            maxLength: 60
+        source_publisher:
+          type: string
+          maxLength: 200
+        source_document:
+          type: string
+          maxLength: 300
+        source_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 500
+          - type: string
+            maxLength: 0
+        archived_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 500
+          - type: string
+            maxLength: 0
+        retrieval_date:
+          type: string
+          format: date
+          nullable: true
+        source_tier:
+          oneOf:
+          - $ref: '#/components/schemas/SourceTierEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        collection_method:
+          oneOf:
+          - $ref: '#/components/schemas/CollectionMethodEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        source_terms:
+          type: string
+          maxLength: 300
+        period_type:
+          oneOf:
+          - $ref: '#/components/schemas/PeriodTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        next_update:
+          type: string
+          maxLength: 60
+        methodology:
+          type: string
+        known_limitations:
+          type: string
+        lgd_levels:
+          type: array
+          items:
+            type: string
+            maxLength: 30
+        quality_grade:
+          oneOf:
+          - $ref: '#/components/schemas/QualityGradeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        license:
+          oneOf:
+          - $ref: '#/components/schemas/LicenseEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        steward:
+          type: string
+          maxLength: 120
+        contact:
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        related_publications:
+          type: array
+          items:
+            type: string
+          description: Publications that use this dataset, by slug.
+        column_dictionary: {}
+        provenance: {}
+        qa_report: {}
+        qa_checklist: {}
+        qa_checklist_items:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+          description: 'The manual QA checklist: the keys `qa_checklist` takes, with
+            their labels, in order.'
+        approved_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
@@ -7294,6 +7583,22 @@ components:
         download_count:
           type: integer
           readOnly: true
+    PeriodTypeEnum:
+      enum:
+      - calendar_year
+      - fiscal_year
+      - academic_year
+      - survey_year
+      - snapshot
+      - other
+      type: string
+      description: |-
+        * `calendar_year` - Calendar year
+        * `fiscal_year` - Fiscal year
+        * `academic_year` - Academic year
+        * `survey_year` - Survey year
+        * `snapshot` - Snapshot
+        * `other` - Other
     PersonProfile:
       type: object
       properties:
@@ -7592,6 +7897,16 @@ components:
         * `business` - Business
         * `personal` - Personal interest
         * `other` - Other
+    QualityGradeEnum:
+      enum:
+      - A
+      - B
+      - C
+      type: string
+      description: |-
+        * `A` - A
+        * `B` - B
+        * `C` - C
     Recognition:
       type: object
       properties:
@@ -7721,6 +8036,20 @@ components:
         * `editor` - Editor
         * `fellow` - Intern / Fellow
         * `admin` - Admin
+    SourceTierEnum:
+      enum:
+      - '1'
+      - '2'
+      - '3'
+      - '4'
+      - P
+      type: string
+      description: |-
+        * `1` - 1 Official producer
+        * `2` - 2 Official, second-hand or RTI
+        * `3` - 3 Research or civil society
+        * `4` - 4 Unverified
+        * `P` - P PRI
     StageEnum:
       enum:
       - ongoing

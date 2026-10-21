@@ -1,9 +1,32 @@
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
 from apps.workflow.models import WorkflowMixin
+
+# The QA analyst's manual checks before a dataset is approved (pri-data docs/PUBLISHING_PLAN.md Appendix D).
+QA_CHECKLIST_ITEMS = [
+    ("source_opens", "Source opens; archived copy opens; tier is right."),
+    ("row_count", "Row count matches the source, or the difference is explained in limitations."),
+    ("sample_rows", "At least 20 random rows checked against the original file."),
+    ("totals", "Totals reconcile (counts within 1, percentages within 0.1), or the gap is explained."),
+    ("geography_codes", "Geography codes look right on a sample (district names and LGD codes match)."),
+    ("units_periods", "Units, period type and time period are correct."),
+    ("no_personal_data", "No personal data; small counts suppressed where needed."),
+    ("dictionary", "Column dictionary is understandable to an outsider."),
+    ("text", "Description, methodology and limitations read clearly."),
+    ("downloads", "Every download (CSV, XLSX, Parquet) opens; Malayalam text displays correctly."),
+    ("grade", "Quality grade confirmed."),
+]
+
+# Fields a dataset must have before it can be published (the publish gate), in the order they are reported.
+PUBLISH_REQUIRED_FIELDS = [
+    "code", "version", "title", "summary", "description", "sub_theme", "source_publisher", "source_url",
+    "archived_url", "retrieval_date", "source_tier", "collection_method", "geography", "granularity", "time_period",
+    "period_type", "update_frequency", "methodology", "known_limitations", "license", "steward", "quality_grade",
+]
 
 # Formats a dataset's files can be in. Previews (previews.py, geo.py) read only some of them; the rest are downloads.
 FORMAT_CHOICES = [
@@ -47,6 +70,56 @@ class Dataset(WorkflowMixin):
     columns = models.JSONField(default=list, blank=True)
     # Size of the main file in bytes, recorded when the file changes, so listings don't ask storage for it.
     file_size = models.PositiveBigIntegerField(null=True, blank=True)
+
+    # PRI Data Framework metadata (pri-data docs/PUBLISHING_PLAN.md B1). Optional in the database so older rows
+    # stay valid; the publish gate (DatasetViewSet.publish_blocker) is what requires them.
+    SOURCE_TIER_CHOICES = [("1", "1 Official producer"), ("2", "2 Official, second-hand or RTI"),
+                           ("3", "3 Research or civil society"), ("4", "4 Unverified"), ("P", "P PRI")]
+    COLLECTION_METHOD_CHOICES = [("administrative", "Administrative"), ("census", "Census"),
+                                 ("sample_survey", "Sample survey"), ("rti", "RTI reply"),
+                                 ("pri_primary", "PRI primary data"), ("compiled", "Compiled")]
+    PERIOD_TYPE_CHOICES = [("calendar_year", "Calendar year"), ("fiscal_year", "Fiscal year"),
+                           ("academic_year", "Academic year"), ("survey_year", "Survey year"),
+                           ("snapshot", "Snapshot"), ("other", "Other")]
+    QUALITY_GRADE_CHOICES = [("A", "A"), ("B", "B"), ("C", "C")]
+    LICENSE_CHOICES = [("CC-BY-4.0", "CC BY 4.0"), ("CC-BY-NC-4.0", "CC BY-NC 4.0"), ("GODL-India", "GODL-India"),
+                       ("ODbL-1.0", "ODbL 1.0"), ("other", "Other")]
+
+    code = models.CharField(max_length=20, unique=True, null=True, blank=True, default=None)
+    version = models.CharField(max_length=20, blank=True)
+    summary = models.CharField(max_length=200, blank=True)
+    keywords = ArrayField(models.CharField(max_length=60), blank=True, default=list)
+    source_publisher = models.CharField(max_length=200, blank=True)
+    source_document = models.CharField(max_length=300, blank=True)
+    source_url = models.URLField(max_length=500, blank=True)
+    archived_url = models.URLField(max_length=500, blank=True)
+    retrieval_date = models.DateField(null=True, blank=True)
+    source_tier = models.CharField(max_length=1, choices=SOURCE_TIER_CHOICES, blank=True)
+    collection_method = models.CharField(max_length=30, choices=COLLECTION_METHOD_CHOICES, blank=True)
+    source_terms = models.CharField(max_length=300, blank=True)
+    period_type = models.CharField(max_length=20, choices=PERIOD_TYPE_CHOICES, blank=True)
+    next_update = models.CharField(max_length=60, blank=True)
+    methodology = models.TextField(blank=True)
+    known_limitations = models.TextField(blank=True)
+    lgd_levels = ArrayField(models.CharField(max_length=30), blank=True, default=list)
+    quality_grade = models.CharField(max_length=1, choices=QUALITY_GRADE_CHOICES, blank=True)
+    license = models.CharField(max_length=40, choices=LICENSE_CHOICES, blank=True, default="CC-BY-4.0")
+    steward = models.CharField(max_length=120, blank=True)
+    contact = models.EmailField(blank=True)
+    related_publications = models.ManyToManyField("publications.Publication", related_name="datasets", blank=True)
+    # [{name, label, description, data_type, unit, allowed_values, null_meaning, ...}], one per column.
+    column_dictionary = models.JSONField(default=list, blank=True)
+    # Where the files came from: {pipeline_repo, git_sha, run_ids, schema_version, built_at, inputs, files}.
+    provenance = models.JSONField(default=dict, blank=True)
+    # Output of `pri publish --check`: {passed, grade_proposed, checks: [{id, name, status, detail}]}.
+    qa_report = models.JSONField(default=dict, blank=True)
+    # The QA analyst's manual checklist {item key: done} (QA_CHECKLIST_ITEMS); editor/admin only.
+    qa_checklist = models.JSONField(default=dict, blank=True)
+    # Set on the move to approved and cleared on a move back (two-person rule: the approver can't publish).
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
 
     @classmethod
     def from_db(cls, db, field_names, values):
