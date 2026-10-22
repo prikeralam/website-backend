@@ -860,15 +860,13 @@ class DatasetPublishingFrameworkTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("another editor has to approve", response.data["detail"])
 
-    def test_approver_cannot_publish_but_a_second_editor_can(self):
+    def test_approver_can_publish_for_now(self):
+        # #131: the approve/publish half of the two-person rule is lifted until a second editor joins.
         self.ready_for_publishing()
         dataset = Dataset.objects.get(slug="sslc-results")
         self.assertEqual(dataset.approved_by, self.qa)
         self.assertIsNotNone(dataset.approved_at)
-        response = self.move(self.qa, "published")
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["detail"], "You approved this dataset, so another editor has to publish it.")
-        self.assertEqual(self.move(self.lead, "published").status_code, 200)
+        self.assertEqual(self.move(self.qa, "published").status_code, 200)
 
     def test_returning_to_draft_clears_the_approval(self):
         self.ready_for_publishing()

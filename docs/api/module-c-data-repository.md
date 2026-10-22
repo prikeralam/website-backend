@@ -106,9 +106,10 @@ empty; `source_tier` is `4`; a profiled column has no labelled `column_dictionar
 empties a required field of a published dataset is refused (fields that were never filled can stay empty).
 
 **Two-person rule** (`transition_blocker`, shared by every workflow type through `WorkflowViewSetMixin`): the
-creator of a dataset can't approve it ("You created this dataset, so another editor has to approve it.") and the
-approver can't publish it ("You approved this dataset, so another editor has to publish it."). So a pipeline
-dataset is submitted, approved and published by three accounts, each an audit-log row. `after_transition` is the
+creator of a dataset can't approve it ("You created this dataset, so another editor has to approve it."). The
+second half, the approver can't publish, is lifted for now (#131) so a single editor can approve and publish; it
+will come back once there is a second editor. So a pipeline dataset is submitted by `pri-pipeline` and approved
+and published by an editor, each an audit-log row. `after_transition` is the
 matching hook for side effects; publications keep their cover rule through `publish_blocker`.
 
 ## Collections
