@@ -115,7 +115,7 @@ class Dataset(WorkflowMixin):
     qa_report = models.JSONField(default=dict, blank=True)
     # The QA analyst's manual checklist {item key: done} (QA_CHECKLIST_ITEMS); editor/admin only.
     qa_checklist = models.JSONField(default=dict, blank=True)
-    # Set on the move to approved and cleared on a move back (two-person rule: the approver can't publish).
+    # Set on the move to approved and cleared on a move back (kept for the approver-can't-publish rule, lifted in #131).
     approved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
