@@ -117,11 +117,10 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
         return "This dataset can't be published yet: " + "; ".join(problems) + "."
 
     def transition_blocker(self, obj, target, user):
-        # Two-person rule: whoever created a dataset doesn't approve it, and whoever approved it doesn't publish it.
+        # Two-person rule, creator half: whoever created a dataset doesn't approve it. The approver may publish for now
+        # (#131, a single editor approves and publishes until a second one joins); the check comes back later.
         if target == WorkflowStatus.APPROVED and obj.created_by_id == user.id:
             return "You created this dataset, so another editor has to approve it."
-        if target == WorkflowStatus.PUBLISHED and obj.approved_by_id == user.id:
-            return "You approved this dataset, so another editor has to publish it."
         return super().transition_blocker(obj, target, user)
 
     def after_transition(self, obj, previous, target, user):
