@@ -4,11 +4,15 @@ from django.conf import settings
 from django.db import models
 
 from apps.workflow.models import WorkflowMixin
-from apps.workflow.uploads import DOCUMENT_VALIDATORS
+from apps.workflow.uploads import DOCUMENT_VALIDATORS, PDF_VALIDATORS
 
 
 class JobOpening(WorkflowMixin):
     """A role PRI is hiring for, listed on the careers page."""
+
+    class WritingSample(models.TextChoices):
+        OPTIONAL = "optional", "Optional"
+        REQUIRED = "required", "Required"
 
     slug = models.SlugField(unique=True)
     title = models.CharField(max_length=200)
@@ -20,6 +24,10 @@ class JobOpening(WorkflowMixin):
     rolling = models.BooleanField(default=True)
     deadline = models.DateField(null=True, blank=True)
     display_order = models.PositiveIntegerField(default=0, db_index=True)
+    # Whether applicants for this role must send a writing sample (e.g. research roles); optional otherwise.
+    writing_sample = models.CharField(max_length=10, choices=WritingSample.choices, default=WritingSample.OPTIONAL)
+    # The full job description as a PDF, shown on the opening's page for applicants to download and share.
+    description_pdf = models.FileField(upload_to="jobs/", blank=True, validators=PDF_VALIDATORS)
 
     class Meta(WorkflowMixin.Meta):
         ordering = ["display_order", "id"]
@@ -51,7 +59,8 @@ class Application(models.Model):
     full_name = models.CharField(max_length=120)
     email = models.EmailField()
     cv = models.FileField(upload_to=application_upload_to, validators=DOCUMENT_VALIDATORS)
-    sop = models.FileField(upload_to=application_upload_to, validators=DOCUMENT_VALIDATORS)
+    cover_letter = models.FileField(upload_to=application_upload_to, validators=DOCUMENT_VALIDATORS)
+    writing_sample = models.FileField(upload_to=application_upload_to, validators=DOCUMENT_VALIDATORS, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW)
     created_at = models.DateTimeField(auto_now_add=True)
     handled_at = models.DateTimeField(null=True, blank=True)
@@ -69,3 +78,4 @@ class Application(models.Model):
 # Module-level names for the API schema's enum overrides (settings.SPECTACULAR_SETTINGS).
 APPLICATION_KIND_CHOICES = Application.Kind.choices
 APPLICATION_STATUS_CHOICES = Application.Status.choices
+WRITING_SAMPLE_CHOICES = JobOpening.WritingSample.choices

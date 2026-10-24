@@ -228,6 +228,7 @@ SPECTACULAR_SETTINGS = {
         "ReleaseStatusEnum": "apps.datarepo.models.ReleaseStatus.choices",
         "ApplicationKindEnum": "apps.careers.models.APPLICATION_KIND_CHOICES",
         "ApplicationStatusEnum": "apps.careers.models.APPLICATION_STATUS_CHOICES",
+        "WritingSampleEnum": "apps.careers.models.WRITING_SAMPLE_CHOICES",
         "EventKindEnum": "apps.events.models.EVENT_KIND_CHOICES",
         "EventModeEnum": "apps.events.models.EVENT_MODE_CHOICES",
     },

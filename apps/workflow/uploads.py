@@ -74,6 +74,10 @@ def validate_document_content(file):
 
 DOCUMENT_VALIDATORS = [FileExtensionValidator(DOCUMENT_EXTENSIONS), validate_document_size, validate_document_content]
 
+# Files PRI publishes for people to download and share, such as a job description: PDF only, same size and content
+# checks as documents.
+PDF_VALIDATORS = [FileExtensionValidator(["pdf"]), validate_document_size, validate_document_content]
+
 
 # Data story bodies: one self-contained HTML file per publication. The frontend shows it in a sandboxed iframe, so
 # these checks are about keeping stories portable (scripts only from the two pinned CDNs), not about isolation.
@@ -133,3 +137,9 @@ class StoryUploadField(ImageUploadField):
     """An optional story upload: same null/empty handling as images, with the story validators."""
 
     default_validators_list = STORY_VALIDATORS
+
+
+class PdfUploadField(ImageUploadField):
+    """An optional PDF upload (e.g. a job description): same null/empty handling as images, PDF validators."""
+
+    default_validators_list = PDF_VALIDATORS

@@ -185,16 +185,18 @@ paths:
   /api/v1/applications/{id}/files/{document}/:
     get:
       operationId: v1_applications_files_retrieve
-      description: A link to the applicant's CV or SOP. On S3 it is presigned and
-        expires; never stored on the page.
+      description: |-
+        A link to the applicant's CV, cover letter or writing sample. On S3 it is presigned and expires; never
+        stored on the page.
       parameters:
       - in: path
         name: document
         schema:
           type: string
           enum:
+          - cover_letter
           - cv
-          - sop
+          - writing_sample
         required: true
       - in: path
         name: id
@@ -209,11 +211,14 @@ paths:
       responses:
         '200':
           description: '{"file": "<short-lived URL>"}'
+        '404':
+          description: No such file was sent (writing samples are optional).
   /api/v1/apply/:
     post:
       operationId: v1_apply_create
-      description: The public application form (fellowships, internships and job openings),
-        with a CV and an SOP.
+      description: |-
+        The public application form (fellowships, internships and job openings), with a CV, a cover letter and,
+        optionally or where the role asks for one, a writing sample.
       tags:
       - Module D — Careers & Applications
       requestBody:
@@ -5088,6 +5093,10 @@ components:
           type: string
           format: email
           readOnly: true
+        has_writing_sample:
+          type: boolean
+          readOnly: true
+          description: Whether the applicant sent a writing sample.
         status:
           $ref: '#/components/schemas/ApplicationStatusEnum'
         created_at:
@@ -5109,6 +5118,7 @@ components:
       - full_name
       - handled_at
       - handled_by
+      - has_writing_sample
       - id
       - job_slug
       - job_title
@@ -5152,20 +5162,25 @@ components:
           type: string
           format: uri
           pattern: (?:pdf|doc|docx)$
-        sop:
+        cover_letter:
           type: string
           format: uri
+          pattern: (?:pdf|doc|docx)$
+        writing_sample:
+          type: string
+          format: uri
+          nullable: true
           pattern: (?:pdf|doc|docx)$
         website:
           type: string
           writeOnly: true
           maxLength: 200
       required:
+      - cover_letter
       - cv
       - email
       - full_name
       - kind
-      - sop
     AuditLog:
       type: object
       properties:
@@ -6218,6 +6233,15 @@ components:
           type: integer
           maximum: 2147483647
           minimum: 0
+        writing_sample:
+          $ref: '#/components/schemas/WritingSampleEnum'
+        description_pdf:
+          type: string
+          format: uri
+          nullable: true
+          description: The job description as a PDF (up to 5 MB), shown on the opening's
+            page. Send null to remove it.
+          pattern: (?:pdf)$
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
@@ -6948,6 +6972,10 @@ components:
           type: string
           format: email
           readOnly: true
+        has_writing_sample:
+          type: boolean
+          readOnly: true
+          description: Whether the applicant sent a writing sample.
         status:
           $ref: '#/components/schemas/ApplicationStatusEnum'
         created_at:
@@ -7544,6 +7572,15 @@ components:
           type: integer
           maximum: 2147483647
           minimum: 0
+        writing_sample:
+          $ref: '#/components/schemas/WritingSampleEnum'
+        description_pdf:
+          type: string
+          format: uri
+          nullable: true
+          description: The job description as a PDF (up to 5 MB), shown on the opening's
+            page. Send null to remove it.
+          pattern: (?:pdf)$
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
@@ -8880,6 +8917,14 @@ components:
         * `approved` - Approved
         * `published` - Published
         * `unpublished` - Unpublished
+    WritingSampleEnum:
+      enum:
+      - optional
+      - required
+      type: string
+      description: |-
+        * `optional` - Optional
+        * `required` - Required
   securitySchemes:
     jwtAuth:
       type: http

@@ -19,6 +19,7 @@ from .services import notify_staff
 from .throttles import ApplicationEmailRateThrottle, ApplicationGlobalRateThrottle
 
 MODULE_TAG = "Module D — Careers & Applications"
+DOCUMENTS = {"cv": "CV", "cover_letter": "cover letter", "writing_sample": "writing sample"}
 
 
 @extend_schema(tags=[MODULE_TAG])
@@ -31,7 +32,8 @@ class JobOpeningViewSet(WorkflowViewSetMixin, ModelViewSet):
 
 @extend_schema(tags=[MODULE_TAG])
 class ApplicationSubmissionView(APIView):
-    """The public application form (fellowships, internships and job openings), with a CV and an SOP."""
+    """The public application form (fellowships, internships and job openings), with a CV, a cover letter and,
+    optionally or where the role asks for one, a writing sample."""
 
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -68,14 +70,21 @@ class ApplicationViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
     http_method_names = ["get", "patch", "head", "options"]
 
     @extend_schema(
-        parameters=[OpenApiParameter("document", str, enum=["cv", "sop"], location=OpenApiParameter.PATH)],
-        responses={200: OpenApiResponse(description='{"file": "<short-lived URL>"}')},
+        parameters=[OpenApiParameter("document", str, enum=list(DOCUMENTS), location=OpenApiParameter.PATH)],
+        responses={
+            200: OpenApiResponse(description='{"file": "<short-lived URL>"}'),
+            404: OpenApiResponse(description="No such file was sent (writing samples are optional)."),
+        },
     )
-    @action(detail=True, methods=["get"], url_path=r"files/(?P<document>cv|sop)")
+    @action(detail=True, methods=["get"], url_path=r"files/(?P<document>cv|cover_letter|writing_sample)")
     def files(self, request, pk=None, document=None):
-        """A link to the applicant's CV or SOP. On S3 it is presigned and expires; never stored on the page."""
+        """A link to the applicant's CV, cover letter or writing sample. On S3 it is presigned and expires; never
+        stored on the page."""
         application = self.get_object()
-        return Response({"file": request.build_absolute_uri(getattr(application, document).url)})
+        stored = getattr(application, document)
+        if not stored:
+            return Response({"detail": f"No {DOCUMENTS[document]} was sent."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"file": request.build_absolute_uri(stored.url)})
 
     def perform_update(self, serializer):
         previous = serializer.instance.status
