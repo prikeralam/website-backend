@@ -15,7 +15,7 @@ The careers page's openings, and one application form for fellowships, internshi
 
 ## Job openings
 
-A `JobOpening` is `slug`, `title`, `summary`, `description`, `location`, `employment_type`, `rolling` (default `true`: apply any time), `deadline` (date or null; only meaningful when not rolling), `display_order` (lowest first, then oldest), `writing_sample` (`optional`, the default, or `required`: whether applicants for this role must send one), `description_pdf` (optional job description PDF, up to 5 MB, checked to be a real PDF; reads as its URL, presigned on S3; `null` or an empty multipart value removes it), plus the workflow fields. Editors upload the PDF with the opening (multipart `POST`/`PATCH`).
+A `JobOpening` is `slug`, `title`, `summary`, `description`, `location`, `employment_type`, `rolling` (default `false`; `true` means apply any time), `deadline` (the last day to apply; required unless rolling, and sending one turns `rolling` off, since a deadline is what staff mean), `is_closed` (read-only: the deadline has passed, by India's date), `display_order` (lowest first, then oldest), `writing_sample` (`optional`, the default, or `required`: whether applicants for this role must send one), `description_pdf` (optional job description PDF, up to 5 MB, checked to be a real PDF; reads as its URL, presigned on S3; `null` or an empty multipart value removes it), plus the workflow fields. Editors upload the PDF with the opening (multipart `POST`/`PATCH`).
 
 Migration `careers/0002` creates the two openings PRI is hiring for, Research Associate and Data Analyst, both rolling and published, owned by the first admin. A database with no users gets none.
 
@@ -24,7 +24,7 @@ Migration `careers/0002` creates the two openings PRI is hiring for, Research As
 `POST /api/v1/apply/` as `multipart/form-data`:
 
 - `kind`: `fellowship`, `internship` or `job`.
-- `job`: the opening's slug. Required when `kind` is `job`, and must be a published opening; ignored otherwise.
+- `job`: the opening's slug. Required when `kind` is `job`, and must be a published opening whose deadline has not passed (400 "Applications for this role closed on <date>."; the deadline day itself still counts); ignored otherwise.
 - `full_name`, `email`.
 - `cv`, `cover_letter`: PDF, DOC or DOCX, at most 5 MB each. The file's first bytes must match its extension, so a renamed file of another kind is refused.
 - `writing_sample`: same rules, optional; required (400 "This role asks for a writing sample.") when the job opening's `writing_sample` is `required`.
