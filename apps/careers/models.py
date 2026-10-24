@@ -1,7 +1,9 @@
 import uuid
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from apps.workflow.models import WorkflowMixin
 from apps.workflow.uploads import DOCUMENT_VALIDATORS, PDF_VALIDATORS
@@ -20,8 +22,9 @@ class JobOpening(WorkflowMixin):
     description = models.TextField(blank=True)
     location = models.CharField(max_length=200, blank=True)
     employment_type = models.CharField(max_length=100, blank=True)
-    # Rolling openings take applications at any time; the deadline only applies when this is off.
-    rolling = models.BooleanField(default=True)
+    # Rolling openings take applications at any time; otherwise the deadline (the last day to apply) applies. A deadline
+    # always turns rolling off (JobOpeningSerializer), so a date set by staff is never hidden.
+    rolling = models.BooleanField(default=False)
     deadline = models.DateField(null=True, blank=True)
     display_order = models.PositiveIntegerField(default=0, db_index=True)
     # Whether applicants for this role must send a writing sample (e.g. research roles); optional otherwise.
@@ -32,8 +35,17 @@ class JobOpening(WorkflowMixin):
     class Meta(WorkflowMixin.Meta):
         ordering = ["display_order", "id"]
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether the deadline has passed. The deadline is the last day to apply, in India's date."""
+        return bool(self.deadline) and self.deadline < india_today()
+
     def __str__(self):
         return self.title
+
+
+def india_today():
+    return timezone.localdate(timezone=ZoneInfo("Asia/Kolkata"))
 
 
 def application_upload_to(instance, filename):

@@ -11,6 +11,7 @@ class JobOpeningSerializer(serializers.ModelSerializer):
     description_pdf = PdfUploadField(
         help_text="The job description as a PDF (up to 5 MB), shown on the opening's page. Send null to remove it."
     )
+    is_closed = serializers.BooleanField(read_only=True, help_text="Whether the deadline has passed (India date).")
 
     class Meta:
         model = JobOpening
@@ -27,9 +28,21 @@ class JobOpeningSerializer(serializers.ModelSerializer):
             "display_order",
             "writing_sample",
             "description_pdf",
+            "is_closed",
             *WORKFLOW_FIELDS,
         ]
         read_only_fields = WORKFLOW_FIELDS
+
+    def validate(self, attrs):
+        instance = self.instance
+        deadline = attrs["deadline"] if "deadline" in attrs else getattr(instance, "deadline", None)
+        rolling = attrs["rolling"] if "rolling" in attrs else getattr(instance, "rolling", False)
+        if deadline and "deadline" in attrs:
+            # A deadline is what staff mean when they set one: it turns rolling applications off.
+            attrs["rolling"] = rolling = False
+        if not rolling and not deadline:
+            raise serializers.ValidationError({"deadline": "Set a deadline, or choose rolling applications."})
+        return attrs
 
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user
@@ -68,6 +81,10 @@ class ApplicationSubmissionSerializer(serializers.ModelSerializer):
         if attrs["kind"] != Application.Kind.JOB:
             attrs["job"] = None
         job = attrs.get("job")
+        if job and job.is_closed:
+            raise serializers.ValidationError(
+                {"job": f"Applications for this role closed on {job.deadline:%d %b %Y}.".replace(" 0", " ")}
+            )
         if job and job.writing_sample == JobOpening.WritingSample.REQUIRED and not attrs.get("writing_sample"):
             raise serializers.ValidationError({"writing_sample": "This role asks for a writing sample."})
         return attrs
