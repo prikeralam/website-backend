@@ -4,12 +4,20 @@ from apps.workflow.uploads import DOCUMENT_VALIDATORS, PdfUploadField
 
 from .models import Application, JobOpening
 
+
+def long_date(value):
+    return f"{value.day} {value:%B %Y}"
+
 WORKFLOW_FIELDS = ["status", "created_by", "reviewed_by", "created_at", "updated_at", "published_at"]
 
 
 class JobOpeningSerializer(serializers.ModelSerializer):
     description_pdf = PdfUploadField(
         help_text="The job description as a PDF (up to 5 MB), shown on the opening's page. Send null to remove it."
+    )
+    is_closed = serializers.BooleanField(
+        read_only=True,
+        help_text="Whether the deadline has passed (judged on India's date); closed roles refuse applications.",
     )
 
     class Meta:
@@ -27,9 +35,28 @@ class JobOpeningSerializer(serializers.ModelSerializer):
             "display_order",
             "writing_sample",
             "description_pdf",
+            "is_closed",
             *WORKFLOW_FIELDS,
         ]
         read_only_fields = WORKFLOW_FIELDS
+
+    def validate(self, attrs):
+        # A role either takes applications at any time (rolling) or until a deadline, never both. A deadline that is
+        # sent wins over rolling, so an opening can't be saved as rolling with a deadline nobody sees; choosing rolling
+        # without sending a deadline drops the stored one. Edits that touch neither (a PDF upload) are left alone.
+        instance = self.instance
+        if instance and "rolling" not in attrs and "deadline" not in attrs:
+            return attrs
+        if "deadline" in attrs:
+            deadline = attrs["deadline"]
+            rolling = attrs.get("rolling", instance.rolling if instance else False) and deadline is None
+        else:
+            rolling = attrs.get("rolling", instance.rolling if instance else False)
+            deadline = None if rolling else (instance.deadline if instance else None)
+        if not rolling and deadline is None:
+            raise serializers.ValidationError({"deadline": "Set a deadline, or choose rolling applications."})
+        attrs["rolling"], attrs["deadline"] = rolling, deadline
+        return attrs
 
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user
@@ -68,6 +95,9 @@ class ApplicationSubmissionSerializer(serializers.ModelSerializer):
         if attrs["kind"] != Application.Kind.JOB:
             attrs["job"] = None
         job = attrs.get("job")
+        if job and job.is_closed:
+            closed_on = long_date(job.deadline)
+            raise serializers.ValidationError({"job": f"Applications for this role closed on {closed_on}."})
         if job and job.writing_sample == JobOpening.WritingSample.REQUIRED and not attrs.get("writing_sample"):
             raise serializers.ValidationError({"writing_sample": "This role asks for a writing sample."})
         return attrs

@@ -1,10 +1,15 @@
 import uuid
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from apps.workflow.models import WorkflowMixin
 from apps.workflow.uploads import DOCUMENT_VALIDATORS, PDF_VALIDATORS
+
+# Deadlines are dates in India, whatever the server's time zone (settings use UTC).
+INDIA = ZoneInfo("Asia/Kolkata")
 
 
 class JobOpening(WorkflowMixin):
@@ -20,8 +25,8 @@ class JobOpening(WorkflowMixin):
     description = models.TextField(blank=True)
     location = models.CharField(max_length=200, blank=True)
     employment_type = models.CharField(max_length=100, blank=True)
-    # Rolling openings take applications at any time; the deadline only applies when this is off.
-    rolling = models.BooleanField(default=True)
+    # Rolling openings take applications at any time and have no deadline; the others close after their deadline.
+    rolling = models.BooleanField(default=False)
     deadline = models.DateField(null=True, blank=True)
     display_order = models.PositiveIntegerField(default=0, db_index=True)
     # Whether applicants for this role must send a writing sample (e.g. research roles); optional otherwise.
@@ -34,6 +39,11 @@ class JobOpening(WorkflowMixin):
 
     def __str__(self):
         return self.title
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether the deadline has passed: applications are taken until the end of the deadline day in India."""
+        return self.deadline is not None and self.deadline < timezone.localdate(timezone=INDIA)
 
 
 def application_upload_to(instance, filename):
