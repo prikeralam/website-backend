@@ -1,4 +1,5 @@
 import tempfile
+from datetime import UTC, date, datetime, timedelta
 from importlib import import_module
 from unittest import mock
 
@@ -13,7 +14,7 @@ from rest_framework.test import APITestCase
 
 from apps.accounts.models import AuditLog
 
-from .models import Application, JobOpening
+from .models import INDIA, Application, JobOpening
 
 User = get_user_model()
 
@@ -67,6 +68,15 @@ class ApplicationSubmissionTests(APITestCase):
         response = self.apply(kind="job")
         self.assertEqual(response.status_code, 400)
         self.assertIn("job", response.data)
+
+    def test_a_role_takes_applications_until_its_deadline_day(self):
+        today = timezone.localdate(timezone=INDIA)
+        JobOpening.objects.filter(pk=self.job.pk).update(rolling=False, deadline=today)
+        self.assertEqual(self.apply(kind="job", job="analyst").status_code, 201)
+        JobOpening.objects.filter(pk=self.job.pk).update(deadline=date(2026, 10, 1))
+        response = self.apply(kind="job", job="analyst", email="late@example.org")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(str(response.data["job"][0]), "Applications for this role closed on 1 October 2026.")
 
     def test_draft_openings_cannot_be_applied_for(self):
         JobOpening.objects.create(slug="secret", title="Secret", status="draft", created_by=self.owner)
@@ -194,10 +204,12 @@ class JobOpeningTests(APITestCase):
         editor = User.objects.create_user(username="editor1", password="pw12345", role="editor")
         self.client.force_authenticate(editor)
         response = self.client.post(
-            "/api/v1/jobs/", {"slug": "ra", "title": "Research Associate", "display_order": 1}, format="json"
+            "/api/v1/jobs/", {"slug": "ra", "title": "Research Associate", "display_order": 1, "rolling": True},
+            format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
         self.assertTrue(response.data["rolling"])
+        self.assertFalse(response.data["is_closed"])
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get("/api/v1/jobs/").data["results"], [])
         JobOpening.objects.filter(slug="ra").update(status="published", published_at=timezone.now())
@@ -207,7 +219,8 @@ class JobOpeningTests(APITestCase):
         editor = User.objects.create_user(username="editor2", password="pw12345", role="editor")
         self.client.force_authenticate(editor)
         response = self.client.post("/api/v1/jobs/", {"slug": "research-assistant", "title": "Research Assistant",
-                                                      "writing_sample": "required"}, format="json")
+                                                      "writing_sample": "required", "deadline": "2026-11-10"},
+                                    format="json")
         self.assertEqual(response.status_code, 201, response.data)
         return editor
 
@@ -233,6 +246,45 @@ class JobOpeningTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.data["description_pdf"])
 
+    def test_openings_are_not_rolling_by_default(self):
+        self.assertIs(JobOpening._meta.get_field("rolling").default, False)
+
+    def test_an_opening_needs_a_deadline_unless_it_is_rolling(self):
+        editor = User.objects.create_user(username="editor3", password="pw12345", role="editor")
+        self.client.force_authenticate(editor)
+        response = self.client.post("/api/v1/jobs/", {"slug": "ra", "title": "RA"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(str(response.data["deadline"][0]), "Set a deadline, or choose rolling applications.")
+        response = self.client.post("/api/v1/jobs/", {"slug": "ra", "title": "RA", "rolling": False}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_deadline_turns_rolling_off(self):
+        editor = User.objects.create_user(username="editor4", password="pw12345", role="editor")
+        self.client.force_authenticate(editor)
+        response = self.client.post(
+            "/api/v1/jobs/", {"slug": "ra", "title": "RA", "rolling": True, "deadline": "2026-11-10"}, format="json"
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual((response.data["rolling"], response.data["deadline"]), (False, "2026-11-10"))
+        # Choosing rolling later drops the deadline; clearing the deadline of a dated role is refused.
+        response = self.client.patch("/api/v1/jobs/ra/", {"rolling": True}, format="json")
+        self.assertEqual((response.data["rolling"], response.data["deadline"]), (True, None))
+        self.client.patch("/api/v1/jobs/ra/", {"deadline": "2026-11-10"}, format="json")
+        self.assertEqual(self.client.patch("/api/v1/jobs/ra/", {"deadline": None}, format="json").status_code, 400)
+        # Edits that don't touch either are left alone.
+        response = self.client.patch("/api/v1/jobs/ra/", {"description_pdf": pdf("jd.pdf")}, format="multipart")
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_is_closed_after_the_deadline_day_in_india(self):
+        today = timezone.localdate(timezone=INDIA)
+        self.assertFalse(JobOpening(deadline=today).is_closed)
+        self.assertTrue(JobOpening(deadline=today - timedelta(days=1)).is_closed)
+        self.assertFalse(JobOpening(rolling=True).is_closed)
+        # 20:00 UTC on 9 November is already 10 November in India.
+        with mock.patch("django.utils.timezone.now",
+                        return_value=datetime(2026, 11, 9, 20, 0, tzinfo=UTC)):
+            self.assertTrue(JobOpening(deadline=date(2026, 11, 9)).is_closed)
+
     def test_writing_sample_defaults_to_optional(self):
         self.assertEqual(JobOpening.objects.model._meta.get_field("writing_sample").default, "optional")
 
@@ -251,6 +303,16 @@ class InitialOpeningsMigrationTests(APITestCase):
     def test_skips_a_database_without_users(self):
         self.migration.create_openings(apps, None)
         self.assertFalse(JobOpening.objects.exists())
+
+
+class RollingNotDefaultMigrationTests(APITestCase):
+    def test_openings_with_a_deadline_stop_being_rolling(self):
+        owner = User.objects.create_user(username="owner8", password="pw12345", role="admin")
+        JobOpening.objects.create(slug="ra", title="RA", rolling=True, deadline=date(2026, 11, 10), created_by=owner)
+        JobOpening.objects.create(slug="da", title="DA", rolling=True, created_by=owner)
+        import_module("apps.careers.migrations.0005_rolling_not_default").deadlines_are_not_rolling(apps, None)
+        self.assertFalse(JobOpening.objects.get(slug="ra").rolling)
+        self.assertTrue(JobOpening.objects.get(slug="da").rolling)
 
 
 class JobDescriptionsMigrationTests(APITestCase):
