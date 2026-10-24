@@ -6242,6 +6242,11 @@ components:
           description: The job description as a PDF (up to 5 MB), shown on the opening's
             page. Send null to remove it.
           pattern: (?:pdf)$
+        is_closed:
+          type: boolean
+          readOnly: true
+          description: Whether the deadline has passed (judged on India's date); closed
+            roles refuse applications.
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
@@ -6270,6 +6275,7 @@ components:
       - created_at
       - created_by
       - id
+      - is_closed
       - published_at
       - reviewed_by
       - slug
@@ -7581,6 +7587,11 @@ components:
           description: The job description as a PDF (up to 5 MB), shown on the opening's
             page. Send null to remove it.
           pattern: (?:pdf)$
+        is_closed:
+          type: boolean
+          readOnly: true
+          description: Whether the deadline has passed (judged on India's date); closed
+            roles refuse applications.
         status:
           allOf:
           - $ref: '#/components/schemas/WorkflowStatusEnum'
