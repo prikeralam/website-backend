@@ -927,3 +927,225 @@ class DatasetFrameworkMigrationTests(TransactionTestCase):
         executor = MigrationExecutor(connection)
         executor.loader.build_graph()
         executor.migrate(executor.loader.graph.leaf_nodes())
+
+
+# Releases of published datasets (website-backend #125, PRI Data Framework B4).
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class DatasetReleaseTests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        from .models import QA_CHECKLIST_ITEMS, DatasetFile
+
+        User = get_user_model()
+        self.pipeline = User.objects.create_user(username="pri-pipeline", password="pw12345", role="researcher")
+        self.other = User.objects.create_user(username="other", password="pw12345", role="researcher")
+        self.qa = User.objects.create_user(username="qa", password="pw12345", role="editor")
+        self.reader = User.objects.create_user(username="reader", password="pw12345", role="public",
+                                               email_verified=True)
+        education = Theme.objects.get(slug="education")
+        self.sub_theme = Theme.objects.create(slug="higher-education", name="Higher Education", parent=education)
+        fields = DatasetPublishingFrameworkTests.framework_fields(None)
+        fields.update(version="2.0.0", keywords=["AISHE"], lgd_levels=["state"])
+        self.checklist = {k: True for k, _ in QA_CHECKLIST_ITEMS}
+        self.dataset = Dataset.objects.create(
+            slug="aishe", title="AISHE", file=SimpleUploadedFile("aishe.csv", b"a,b\n1,2\n"), format="csv",
+            sub_theme=self.sub_theme, visibility="public", status="published", created_by=self.pipeline,
+            qa_checklist=self.checklist, **fields,
+        )
+        DatasetFile.objects.create(dataset=self.dataset, format="xlsx",
+                                   file=SimpleUploadedFile("aishe.xlsx", b"old workbook"))
+
+    def metadata(self, **extra):
+        return {
+            "time_period": "2011-12 to 2023-24", "title": "AISHE, extended",
+            "column_dictionary": [{"name": c, "label": c.upper()} for c in "abc"],
+            "qa_report": {"passed": True, "grade_proposed": "B", "checks": []}, **extra,
+        }
+
+    def post(self, user=None, version="2.1.0", metadata=None, files=None, fmt="csv"):
+        self.client.force_authenticate(user or self.pipeline)
+        payload = {"version": version, "changelog": "Adds 2011-12 to 2015-16.", "format": fmt,
+                   "metadata": json.dumps(self.metadata() if metadata is None else metadata)}
+        for key, (name, content) in (files or {"csv": ("new.csv", b"a,b,c\n1,2,3\n4,5,6\n")}).items():
+            payload[f"files[{key}]"] = SimpleUploadedFile(name, content)
+        return self.client.post("/api/v1/datasets/aishe/releases/", payload, format="multipart")
+
+    def move(self, release_id, target, user):
+        self.client.force_authenticate(user)
+        return self.client.post(f"/api/v1/datasets/aishe/releases/{release_id}/transition/", {"status": target},
+                                format="json")
+
+    def tick(self, release_id, user=None, checklist=None):
+        self.client.force_authenticate(user or self.qa)
+        return self.client.patch(f"/api/v1/datasets/aishe/releases/{release_id}/",
+                                 {"qa_checklist": self.checklist if checklist is None else checklist}, format="json")
+
+    def approved_release(self, **post_kwargs):
+        response = self.post(**post_kwargs)
+        self.assertEqual(response.status_code, 201, response.data)
+        rid = response.data["id"]
+        self.assertEqual(self.move(rid, "in_review", self.pipeline).status_code, 200)
+        self.assertEqual(self.tick(rid).status_code, 200)
+        self.assertEqual(self.move(rid, "approved", self.qa).status_code, 200)
+        return rid
+
+    # ------------------------------------------------------------------ create
+    def test_first_release_records_the_live_version_as_a_baseline(self):
+        from .models import DatasetRelease
+
+        response = self.post()
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual((response.data["status"], response.data["row_count"], response.data["columns"]),
+                         ("draft", 2, ["a", "b", "c"]))
+        self.assertNotIn("files", response.data)  # the pipeline account doesn't download (no confirmed email)
+        self.assertEqual(len(DatasetRelease.objects.get(pk=response.data["id"]).files.get().sha256), 64)
+        baseline = DatasetRelease.objects.get(dataset=self.dataset, version="2.0.0")
+        self.assertEqual(baseline.status, "published")
+        self.assertEqual(sorted(f.file.name for f in baseline.files.all()),
+                         sorted([self.dataset.file.name, self.dataset.extra_files.get().file.name]))
+        self.assertEqual(baseline.metadata["title"], "AISHE")
+
+    def test_create_refusals(self):
+        cases = [
+            ({"version": "2.0.0"}, "higher than 2.0.0"),
+            ({"version": "2.1"}, "semantic version"),
+            ({"metadata": {"slug": "elsewhere"}}, "can't set slug"),
+            ({"metadata": {"source_url": "http://x.org"}}, "https://"),
+            ({"metadata": self.metadata(column_dictionary=[{"name": "zzz", "label": "Z"}])}, "Not columns"),
+            ({"files": {"xlsx": ("n.xlsx", b"x")}}, "files[csv]"),
+        ]
+        for kwargs, phrase in cases:
+            response = self.post(**kwargs)
+            self.assertEqual(response.status_code, 400, kwargs)
+            self.assertIn(phrase, str(response.data), kwargs)
+
+    def test_who_may_post_a_release(self):
+        self.assertEqual(self.post(user=self.other).status_code, 403)
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.post("/api/v1/datasets/aishe/releases/", {}).status_code, 401)
+        self.assertEqual(self.post(user=self.qa).status_code, 201)
+
+    def test_only_published_datasets_take_releases_one_at_a_time(self):
+        self.assertEqual(self.post().status_code, 201)
+        response = self.post(version="2.2.0")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Release 2.1.0 is still draft", response.data["detail"])
+        Dataset.objects.filter(pk=self.dataset.pk).update(status="draft")
+        self.dataset.releases.all().delete()
+        self.assertIn("published datasets", self.post().data["detail"])
+
+    # ------------------------------------------------------------------ read
+    def test_history_shows_published_releases_and_the_rest_only_to_staff_and_creator(self):
+        self.post()
+        for user, versions in [(None, ["2.0.0"]), (self.other, ["2.0.0"]), (self.pipeline, ["2.1.0", "2.0.0"]),
+                               (self.qa, ["2.1.0", "2.0.0"])]:
+            self.client.force_authenticate(user)
+            body = self.client.get("/api/v1/datasets/aishe/releases/").data
+            self.assertEqual([r["version"] for r in body], versions, user)
+        self.client.force_authenticate(None)
+        self.assertNotIn("files", self.client.get("/api/v1/datasets/aishe/releases/").data[0])
+        self.client.force_authenticate(self.reader)
+        self.assertIn("files", self.client.get("/api/v1/datasets/aishe/releases/").data[0])
+
+    # ------------------------------------------------------------------ review and publish
+    def test_publishing_a_release_replaces_files_and_metadata_and_keeps_the_old_version(self):
+        from apps.accounts.models import AuditLog
+
+        old_main, old_xlsx = self.dataset.file.name, self.dataset.extra_files.get().file.name
+        rid = self.approved_release(files={"csv": ("n.csv", b"a,b,c\n1,2,3\n4,5,6\n"),
+                                           "xlsx": ("n.xlsx", b"new workbook")})
+        response = self.move(rid, "published", self.qa)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        dataset = Dataset.objects.get(pk=self.dataset.pk)
+        self.assertEqual((dataset.status, dataset.version, dataset.title, dataset.time_period),
+                         ("published", "2.1.0", "AISHE, extended", "2011-12 to 2023-24"))
+        self.assertEqual((dataset.row_count, dataset.columns), (2, ["a", "b", "c"]))
+        self.assertNotEqual(dataset.file.name, old_main)
+        self.assertEqual(dataset.extra_files.get().file.read(), b"new workbook")
+        # the previous version's stored files are kept for its release
+        for name in (old_main, old_xlsx):
+            self.assertTrue(dataset.file.storage.exists(name), name)
+        self.client.force_authenticate(self.reader)
+        history = self.client.get("/api/v1/datasets/aishe/releases/").data
+        self.assertEqual([r["version"] for r in history], ["2.1.0", "2.0.0"])
+        self.assertEqual({f["format"] for f in history[1]["files"]}, {"csv", "xlsx"})
+        transitions = AuditLog.objects.filter(target=f"datasetrelease:{rid}", action="release_transition")
+        self.assertEqual([log.metadata["new_status"] for log in transitions.order_by("id")],
+                         ["in_review", "approved", "published"])
+
+    def test_a_draft_takes_more_formats_until_it_is_submitted(self):
+        rid = self.post().data["id"]
+        self.client.force_authenticate(self.pipeline)
+        url = f"/api/v1/datasets/aishe/releases/{rid}/files/"
+        response = self.client.post(url, {"format": "parquet", "file": SimpleUploadedFile("n.parquet", b"x")},
+                                    format="multipart")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.move(rid, "in_review", self.pipeline)
+        self.client.force_authenticate(self.pipeline)
+        response = self.client.post(url, {"format": "xlsx", "file": SimpleUploadedFile("n.xlsx", b"x")},
+                                    format="multipart")
+        self.assertEqual(response.status_code, 403)
+
+    def test_gate_and_transition_rules(self):
+        from .models import DatasetRelease
+
+        rid = self.post().data["id"]
+        self.assertIn("can't move from draft to published", self.move(rid, "published", self.qa).data["detail"])
+        self.move(rid, "in_review", self.pipeline)
+        self.assertEqual(self.move(rid, "approved", self.pipeline).status_code, 403)
+        self.assertEqual(self.tick(rid, user=self.pipeline).status_code, 403)
+        self.move(rid, "approved", self.qa)
+        response = self.move(rid, "published", self.qa)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("QA checklist is not complete", response.data["detail"])
+        self.tick(rid)
+        DatasetRelease.objects.filter(pk=rid).update(metadata=self.metadata(
+            qa_report={"passed": False}, column_dictionary=[{"name": "a", "label": "A"}]))
+        detail = self.move(rid, "published", self.qa).data["detail"]
+        self.assertIn("QA report has not passed", detail)
+        self.assertIn("no label in the column dictionary: b, c", detail)
+
+    def test_creator_cannot_approve_its_own_release(self):
+        rid = self.post(user=self.qa).data["id"]
+        self.move(rid, "in_review", self.qa)
+        self.assertIn("another editor has to approve", self.move(rid, "approved", self.qa).data["detail"])
+
+    def test_returning_to_draft_clears_the_approval_and_reject_frees_the_version(self):
+        from .models import DatasetRelease
+
+        rid = self.approved_release()
+        self.assertEqual(self.move(rid, "draft", self.qa).status_code, 200)
+        self.assertIsNone(DatasetRelease.objects.get(pk=rid).approved_by)
+        self.move(rid, "in_review", self.pipeline)
+        self.assertEqual(self.move(rid, "rejected", self.qa).status_code, 200)
+        self.assertEqual(self.post(version="2.1.0").status_code, 201)
+
+    # ------------------------------------------------------------------ delete
+    def test_the_creator_deletes_its_draft_and_its_files(self):
+        from .models import DatasetReleaseFile
+
+        rid = self.post().data["id"]
+        name = DatasetReleaseFile.objects.get(release_id=rid).file.name
+        self.client.force_authenticate(self.other)
+        self.assertEqual(self.client.delete(f"/api/v1/datasets/aishe/releases/{rid}/").status_code, 404)
+        self.client.force_authenticate(self.pipeline)
+        self.assertEqual(self.client.delete(f"/api/v1/datasets/aishe/releases/{rid}/").status_code, 204)
+        storage = self.dataset.file.storage
+        self.assertFalse(storage.exists(name))
+        self.assertTrue(storage.exists(Dataset.objects.get(pk=self.dataset.pk).file.name))
+
+    def test_published_releases_cannot_be_deleted(self):
+        self.post()
+        baseline = self.dataset.releases.get(version="2.0.0")
+        self.client.force_authenticate(self.qa)
+        self.assertEqual(self.client.delete(f"/api/v1/datasets/aishe/releases/{baseline.pk}/").status_code, 403)
+
+    def test_dataset_publish_gate_is_unchanged(self):
+        # the gate moved into releases.publishing_problems; datasets still use it through publish_blocker
+        Dataset.objects.filter(pk=self.dataset.pk).update(status="approved", steward="")
+        self.client.force_authenticate(self.qa)
+        response = self.client.post("/api/v1/datasets/aishe/transition/", {"status": "published"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("these fields are empty: steward", response.data["detail"])

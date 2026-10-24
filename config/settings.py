@@ -225,6 +225,7 @@ SPECTACULAR_SETTINGS = {
         "WorkflowStatusEnum": "apps.workflow.models.WorkflowStatus.choices",
         "AccessRequestStatusEnum": "apps.datarepo.models.AccessRequest.STATUS_CHOICES",
         "DatasetFormatEnum": "apps.datarepo.models.FORMAT_CHOICES",
+        "ReleaseStatusEnum": "apps.datarepo.models.ReleaseStatus.choices",
         "ApplicationKindEnum": "apps.careers.models.APPLICATION_KIND_CHOICES",
         "ApplicationStatusEnum": "apps.careers.models.APPLICATION_STATUS_CHOICES",
         "EventKindEnum": "apps.events.models.EVENT_KIND_CHOICES",
