@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AccessRequest, Collection, Dashboard, Dataset
+from .models import AccessRequest, Collection, Dashboard, Dataset, DatasetRelease, DatasetReleaseFile
 
 
 @admin.register(Dataset)
@@ -29,3 +29,20 @@ class CollectionAdmin(admin.ModelAdmin):
     list_filter = ("status",)
     search_fields = ("title", "slug")
     filter_horizontal = ("datasets",)
+
+
+class DatasetReleaseFileInline(admin.TabularInline):
+    model = DatasetReleaseFile
+    extra = 0
+    readonly_fields = ("format", "file", "size", "sha256", "created_at")
+
+
+@admin.register(DatasetRelease)
+class DatasetReleaseAdmin(admin.ModelAdmin):
+    # Read-mostly: releases move through the API's transition endpoint, which applies the gate and the audit log.
+    list_display = ("dataset", "version", "status", "created_by", "published_at")
+    list_filter = ("status",)
+    search_fields = ("dataset__slug", "dataset__code", "version")
+    readonly_fields = ("dataset", "version", "status", "format", "metadata", "row_count", "column_count", "columns",
+                       "created_by", "approved_by", "approved_at", "published_at", "created_at", "updated_at")
+    inlines = [DatasetReleaseFileInline]

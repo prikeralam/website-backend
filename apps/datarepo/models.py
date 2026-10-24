@@ -175,10 +175,101 @@ class DatasetFile(models.Model):
         return f"{self.dataset.slug} ({self.format})"
 
 
+class ReleaseStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    IN_REVIEW = "in_review", "In Review"
+    APPROVED = "approved", "Approved"
+    PUBLISHED = "published", "Published"
+    REJECTED = "rejected", "Rejected"
+
+
+# A dataset has at most one release on its way to publication at a time.
+OPEN_RELEASE_STATUSES = [ReleaseStatus.DRAFT, ReleaseStatus.IN_REVIEW, ReleaseStatus.APPROVED]
+
+
+class DatasetRelease(models.Model):
+    """A new version of a published dataset (pri-data docs/PUBLISHING_PLAN.md B4).
+
+    It carries its own files and a snapshot of the framework metadata, goes through review like a dataset, and on
+    publication replaces the dataset's files and metadata while the dataset stays published. Published releases are the
+    version history: their files stay downloadable after a newer release replaces them.
+    """
+
+    dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE, related_name="releases")
+    version = models.CharField(max_length=20)
+    changelog = models.TextField(blank=True)
+    # The dataset fields this release sets when published (RELEASE_METADATA_FIELDS in releases.py).
+    metadata = models.JSONField(default=dict, blank=True)
+    format = models.CharField(max_length=20, choices=FORMAT_CHOICES, help_text="Format of the main file.")
+    status = models.CharField(max_length=20, choices=ReleaseStatus.choices, default=ReleaseStatus.DRAFT)
+    qa_checklist = models.JSONField(default=dict, blank=True)
+    # Profile of the main file, worked out on upload, so the gate can check the column labels before publishing.
+    row_count = models.PositiveIntegerField(null=True, blank=True)
+    column_count = models.PositiveIntegerField(null=True, blank=True)
+    columns = models.JSONField(default=list, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="+", on_delete=models.PROTECT)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-published_at", "-created_at"]
+        constraints = [
+            # A rejected release gives its version back, so the corrected files can be sent under the same number.
+            models.UniqueConstraint(
+                fields=["dataset", "version"], condition=~models.Q(status="rejected"), name="one_release_per_version"
+            ),
+            models.UniqueConstraint(
+                fields=["dataset"], condition=models.Q(status__in=["draft", "in_review", "approved"]),
+                name="one_open_release_per_dataset",
+            ),
+        ]
+
+    @property
+    def main_file(self):
+        return next((f for f in self.files.all() if f.format == self.format), None)
+
+    def __str__(self):
+        return f"{self.dataset.slug} {self.version} ({self.status})"
+
+
+class DatasetReleaseFile(models.Model):
+    """One format of a release's data. Published releases share their stored files with the dataset."""
+
+    release = models.ForeignKey(DatasetRelease, on_delete=models.CASCADE, related_name="files")
+    format = models.CharField(max_length=20, choices=FORMAT_CHOICES)
+    file = models.FileField(upload_to="datasets/releases/")
+    size = models.PositiveBigIntegerField(null=True, blank=True)
+    sha256 = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["format"]
+        constraints = [models.UniqueConstraint(fields=["release", "format"], name="one_release_file_per_format")]
+
+    def __str__(self):
+        return f"{self.release} ({self.format})"
+
+
+def stored_file_in_use(name):
+    """Whether a dataset, an extra format or a release still points at this stored file (releases share files)."""
+    return (
+        Dataset.objects.filter(file=name).exists()
+        or DatasetFile.objects.filter(file=name).exists()
+        or DatasetReleaseFile.objects.filter(file=name).exists()
+    )
+
+
 @receiver(post_delete, sender=DatasetFile)
+@receiver(post_delete, sender=DatasetReleaseFile)
 def _delete_stored_file(sender, instance, **kwargs):
-    # Runs for direct deletes and for cascades from the dataset, so no extra format is left in the bucket.
-    if instance.file:
+    # Runs for direct deletes and for cascades from the dataset, so no extra format is left in the bucket. A file that a
+    # release (or, for a release file, the dataset) still uses is kept.
+    if instance.file and not stored_file_in_use(instance.file.name):
         instance.file.delete(save=False)
 
 

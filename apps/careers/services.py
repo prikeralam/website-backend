@@ -16,7 +16,8 @@ def notify_staff(application):
         f"New application from the PRI website.\n\n"
         f"From: {application.full_name} <{application.email}>\n"
         f"Applying for: {applying_for}\n\n"
-        f"The CV and statement of purpose are in the dashboard: {settings.FRONTEND_URL}/dashboard/applications\n"
+        f"The CV, cover letter{' and writing sample' if application.writing_sample else ''} are in the dashboard: "
+        f"{settings.FRONTEND_URL}/dashboard/applications\n"
         f"Reply to this email to answer {application.full_name}."
     )
     email = EmailMessage(
