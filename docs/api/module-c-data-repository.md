@@ -18,6 +18,11 @@ All endpoints taken from the PRD's own API surface list (`docs/PRDs/C-data-repos
 | `POST /api/v1/datasets/{slug}/files/` | Who may edit the dataset: its contributor creator while it's a draft, editors and admins always | — | **Built** — multipart `format`, `file`: adds the same data in another format |
 | `DELETE /api/v1/datasets/{slug}/files/{id}/` | As above | — | **Built** — removes one extra format and deletes its stored file |
 | `POST /api/v1/datasets/{slug}/request-access/` | Authenticated | — | **Built** — creates an `AccessRequest` |
+| `GET /api/v1/datasets/{slug}/releases/` | Public read, visibility-filtered | — | **Built** (#125) — version history: published releases, newest first; staff and each release's creator also see the others. `files` only for callers `/download/` allows |
+| `POST /api/v1/datasets/{slug}/releases/` | Editors, admins and the dataset's contributor creator | — | **Built** (#125) — multipart `version`, `changelog`, `format`, `metadata` (JSON), `files[<format>]`; see "Releases" below |
+| `GET`/`PATCH`/`DELETE /api/v1/datasets/{slug}/releases/{id}/` | Read as above; `PATCH` editors and admins (`qa_checklist`); `DELETE` the creator of a draft, or staff before publication | — | **Built** (#125) |
+| `POST /api/v1/datasets/{slug}/releases/{id}/files/` | The release's creator or staff, while it is a draft | — | **Built** (#125) — multipart `format`, `file` |
+| `POST /api/v1/datasets/{slug}/releases/{id}/transition/` | The creator for `draft -> in_review`, otherwise editors and admins | — | **Built** (#125) — `{"status": ...}` with the dataset's gate and two-person rule |
 | `POST /api/v1/datasets/{slug}/transition/` | Auth (role-gated) | — | **Built** — shared `WorkflowViewSetMixin` action, same as A/B |
 | `GET /api/v1/dashboards/?theme=&geography=&year=&type=` | Public read, published only | `theme`, `geography`, `year`, `type` | **Built** — `theme` here is a direct FK (Dashboard wasn't asked to require a sub-theme, unlike Dataset) |
 | `GET /api/v1/access-requests/?status=&dataset=` | Editor/Admin only | `status`, `dataset` | **Built, addition beyond this doc** — needed so staff can discover which `{id}`s are pending before the `PATCH` below is usable |
@@ -111,6 +116,58 @@ second half, the approver can't publish, is lifted for now (#131) so a single ed
 will come back once there is a second editor. So a pipeline dataset is submitted by `pri-pipeline` and approved
 and published by an editor, each an audit-log row. `after_transition` is the
 matching hook for side effects; publications keep their cover rule through `publish_blocker`.
+
+## Releases (#125)
+
+A published dataset is refreshed by a **release** (pri-data `docs/PUBLISHING_PLAN.md` B4), never by unpublishing it:
+the new version is uploaded and reviewed beside the live one, and publishing it swaps the files and metadata in one
+transaction while the dataset stays published at the same slug. Every published release stays in the version history
+with its files, so a cited version remains downloadable.
+
+**Models** (migration `datarepo.0010`): `DatasetRelease` (`dataset`, `version`, `changelog`, `metadata`, `format` of
+the main file, `status` `draft`/`in_review`/`approved`/`published`/`rejected`, `qa_checklist`, the main file's
+`row_count`/`column_count`/`columns`, `created_by`, `approved_by`/`approved_at`, `published_at`) and
+`DatasetReleaseFile` (`release`, `format`, `file`, `size`, `sha256`; one per format). A version is unique per dataset
+unless rejected (a rejected release gives its number back), and a dataset has at most one release in `draft`,
+`in_review` or `approved` at a time.
+
+**Posting** (`POST /datasets/{slug}/releases/`, multipart): `version` (semver, higher than the dataset's and every
+non-rejected release's), `changelog`, `format` (main file), `metadata` (JSON object) and the files as
+`files[<format>]`, the main format's required. Further formats can be added to a draft one request each
+(`POST .../releases/{id}/files/`), which keeps every upload under the 50 MB nginx limit. Only published datasets take
+releases (`400` otherwise); the dataset's contributor creator (`pri-pipeline`) and editors/admins may post.
+
+- `metadata` may set these dataset fields, validated with the dataset's own rules: `title, description, sub_theme,
+  geography, year, source, update_frequency, granularity, time_period, citation, code, summary, keywords,
+  source_publisher, source_document, source_url, archived_url, retrieval_date, source_tier, collection_method,
+  source_terms, period_type, next_update, methodology, known_limitations, lgd_levels, quality_grade, license, steward,
+  contact, related_publications, column_dictionary, provenance, qa_report`. Not `slug` (links and citations use it) nor
+  `visibility` (an access decision for staff), nor workflow fields.
+- `column_dictionary` names must be columns of the release's main file, which is profiled on upload.
+- **Baseline.** The first release of a dataset also records the live version as a published release (version = the
+  dataset's, `1.0.0` when it has none; changelog "Version published before releases existed."), pointing at the
+  dataset's current files, so they stay downloadable after the swap.
+
+**Review** (`POST .../releases/{id}/transition/`): `draft -> in_review` by its creator or staff; `in_review ->
+approved | draft | rejected` and `approved -> published | draft | rejected` by editors and admins. The creator can't
+approve its own release; the approver may publish for now (#131, as for datasets). Editors tick the release's own
+`qa_checklist` with `PATCH .../releases/{id}/`. Every transition, creation, added file and deletion is audit-logged
+(`release_*` actions, target `datasetrelease:<id>`).
+
+**Publish gate** (`releases.release_publish_blocker`): the dataset gate, applied to the dataset as it would be after
+publishing (the release's metadata over the dataset's fields, the release's version and columns): the release is
+`approved` and its dataset `published`, every required field is filled, tier is not 4, every column of the new file
+is labelled, the release's `metadata.qa_report.passed` is `true`, its checklist is complete and its main file exists.
+
+**Publish effect** (`releases.publish`, one transaction): the metadata is applied through the dataset serializer, the
+dataset's `file`/`format` point at the release's main file and its extra formats are replaced by the release's other
+files, `version` becomes the release's, row count, columns and size are worked out again, and the release becomes
+`published`. Files are shared, not copied: a stored file is deleted only when no dataset, extra format or release
+still points at it (`models.stored_file_in_use`), so deleting a draft release removes its own files and nothing else.
+Published releases can't be deleted.
+
+**Deleting** a release: its creator while it is a draft, editors and admins until it is published. The pipeline
+replaces a draft that QA returned by deleting it and posting again.
 
 ## Collections
 

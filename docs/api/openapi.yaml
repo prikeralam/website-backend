@@ -1400,6 +1400,288 @@ paths:
               schema:
                 $ref: '#/components/schemas/Dataset'
           description: ''
+  /api/v1/datasets/{slug}/releases/:
+    get:
+      operationId: v1_datasets_releases_list
+      description: |-
+        GET: the version history (published releases, newest first; staff and the creator also see the others).
+        POST: a new version of a published dataset, as multipart `version`, `changelog`, `format` (main file),
+        `metadata` (JSON) and `files[<format>]`; the main format's file is required.
+      parameters:
+      - in: query
+        name: code
+        schema:
+          type: string
+      - in: query
+        name: geography
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: q
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: quality_grade
+        schema:
+          type: string
+          enum:
+          - A
+          - B
+          - C
+        description: |-
+          * `A` - A
+          * `B` - B
+          * `C` - C
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: source_tier
+        schema:
+          type: string
+          enum:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - P
+        description: |-
+          * `1` - 1 Official producer
+          * `2` - 2 Official, second-hand or RTI
+          * `3` - 3 Research or civil society
+          * `4` - 4 Unverified
+          * `P` - P PRI
+      - in: query
+        name: sub_theme
+        schema:
+          type: integer
+      - in: query
+        name: theme
+        schema:
+          type: number
+      - in: query
+        name: year
+        schema:
+          type: integer
+      tags:
+      - Module C — Data Repository
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDatasetReleaseList'
+          description: ''
+    post:
+      operationId: v1_datasets_releases_create
+      description: |-
+        GET: the version history (published releases, newest first; staff and the creator also see the others).
+        POST: a new version of a published dataset, as multipart `version`, `changelog`, `format` (main file),
+        `metadata` (JSON) and `files[<format>]`; the main format's file is required.
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module C — Data Repository
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DatasetReleaseCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetRelease'
+          description: ''
+  /api/v1/datasets/{slug}/releases/{release_id}/:
+    get:
+      operationId: v1_datasets_releases_retrieve
+      description: |-
+        GET one release. PATCH: editors tick its QA checklist. DELETE: its creator while it is a draft, editors and
+        admins until it is published (the pipeline replaces a draft by deleting it and posting again).
+      parameters:
+      - in: path
+        name: release_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module C — Data Repository
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetRelease'
+          description: ''
+    patch:
+      operationId: v1_datasets_releases_partial_update
+      description: |-
+        GET one release. PATCH: editors tick its QA checklist. DELETE: its creator while it is a draft, editors and
+        admins until it is published (the pipeline replaces a draft by deleting it and posting again).
+      parameters:
+      - in: path
+        name: release_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module C — Data Repository
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedReleaseChecklist'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedReleaseChecklist'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedReleaseChecklist'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetRelease'
+          description: ''
+    delete:
+      operationId: v1_datasets_releases_destroy
+      description: |-
+        GET one release. PATCH: editors tick its QA checklist. DELETE: its creator while it is a draft, editors and
+        admins until it is published (the pipeline replaces a draft by deleting it and posting again).
+      parameters:
+      - in: path
+        name: release_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module C — Data Repository
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/datasets/{slug}/releases/{release_id}/files/:
+    post:
+      operationId: v1_datasets_releases_files_create
+      description: Add another format to a draft release (one request per file keeps
+        each upload under the 50 MB limit).
+      parameters:
+      - in: path
+        name: release_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module C — Data Repository
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DatasetReleaseFile'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetReleaseFile'
+          description: ''
+  /api/v1/datasets/{slug}/releases/{release_id}/transition/:
+    post:
+      operationId: v1_datasets_releases_transition_create
+      description: |-
+        Move a release through review: draft -> in_review (its creator or staff), then approved, published,
+        rejected or back to draft (editors and admins), with the dataset's gate and two-person rule.
+      parameters:
+      - in: path
+        name: release_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - Module C — Data Repository
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseTransition'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReleaseTransition'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReleaseTransition'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetRelease'
+          description: ''
   /api/v1/datasets/{slug}/request-access/:
     post:
       operationId: v1_datasets_request_access_create
@@ -5479,6 +5761,170 @@ components:
         * `geojson` - GeoJSON
         * `json` - JSON
         * `xlsx` - Excel
+    DatasetRelease:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        version:
+          type: string
+          readOnly: true
+        changelog:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ReleaseStatusEnum'
+          readOnly: true
+        format:
+          allOf:
+          - $ref: '#/components/schemas/DatasetFormatEnum'
+          readOnly: true
+          description: |-
+            Format of the main file.
+
+            * `csv` - CSV
+            * `parquet` - Parquet
+            * `zip` - ZIP
+            * `geojson` - GeoJSON
+            * `json` - JSON
+            * `xlsx` - Excel
+        files:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+          description: 'The release''s files, main first: [{id, format, label, url,
+            size, sha256}]. Omitted for callers who may not download the dataset.'
+        metadata:
+          readOnly: true
+        row_count:
+          type: integer
+          readOnly: true
+          nullable: true
+        column_count:
+          type: integer
+          readOnly: true
+          nullable: true
+        columns:
+          readOnly: true
+        qa_checklist:
+          readOnly: true
+        qa_checklist_items:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+          description: 'The manual QA checklist: the keys `qa_checklist` takes, with
+            their labels, in order.'
+        created_by:
+          type: integer
+          readOnly: true
+        approved_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        published_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approved_at
+      - approved_by
+      - changelog
+      - column_count
+      - columns
+      - created_at
+      - created_by
+      - files
+      - format
+      - id
+      - metadata
+      - published_at
+      - qa_checklist
+      - qa_checklist_items
+      - row_count
+      - status
+      - updated_at
+      - version
+    DatasetReleaseCreate:
+      type: object
+      description: POST /datasets/{slug}/releases/ (multipart). Files go as `files[<format>]`;
+        at least the main format's.
+      properties:
+        version:
+          type: string
+          description: Semantic version, higher than every earlier one.
+          maxLength: 20
+        changelog:
+          type: string
+          description: What changed since the previous version.
+        format:
+          allOf:
+          - $ref: '#/components/schemas/DatasetFormatEnum'
+          description: |-
+            Format of the main file.
+
+            * `csv` - CSV
+            * `parquet` - Parquet
+            * `zip` - ZIP
+            * `geojson` - GeoJSON
+            * `json` - JSON
+            * `xlsx` - Excel
+        metadata:
+          description: Dataset fields this release sets (a JSON object).
+      required:
+      - changelog
+      - format
+      - version
+    DatasetReleaseFile:
+      type: object
+      description: A format of a release, as uploaded (multipart `format`, `file`);
+        size and SHA-256 are worked out.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        format:
+          $ref: '#/components/schemas/DatasetFormatEnum'
+        file:
+          type: string
+          format: uri
+        size:
+          type: integer
+          readOnly: true
+          nullable: true
+        sha256:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - file
+      - format
+      - id
+      - sha256
+      - size
     DatasetVisibilityEnum:
       enum:
       - public
@@ -6139,6 +6585,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Dataset'
+    PaginatedDatasetReleaseList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DatasetRelease'
     PaginatedDocumentList:
       type: object
       required:
@@ -7439,6 +7908,12 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+    PatchedReleaseChecklist:
+      type: object
+      description: 'PATCH /datasets/{slug}/releases/{id}/: editors tick the release''s
+        QA checklist.'
+      properties:
+        qa_checklist: {}
     PatchedRoleUpdate:
       type: object
       properties:
@@ -8015,6 +8490,27 @@ components:
       - first_name
       - password
       - purpose
+    ReleaseStatusEnum:
+      enum:
+      - draft
+      - in_review
+      - approved
+      - published
+      - rejected
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `in_review` - In Review
+        * `approved` - Approved
+        * `published` - Published
+        * `rejected` - Rejected
+    ReleaseTransition:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ReleaseStatusEnum'
+      required:
+      - status
     ResendVerification:
       type: object
       properties:
