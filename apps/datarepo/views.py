@@ -1,10 +1,14 @@
+import re
+
 import django_filters
+from django.db import transaction
 from django.db.models import CharField, F, Func, Q, Value
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import filters, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import BasePermission, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
@@ -13,19 +17,22 @@ from rest_framework.viewsets import ModelViewSet
 
 from apps.accounts.models import AuditLog
 from apps.workflow.models import WorkflowStatus
-from apps.workflow.permissions import STAFF_ROLES, CanSubmitDraft
+from apps.workflow.permissions import CONTRIBUTOR_ROLES, STAFF_ROLES, CanSubmitDraft
 from apps.workflow.views import WorkflowViewSetMixin
 
+from . import releases
 from .geo import GeoJSONError, GeoJSONTooLarge, load_geojson
 from .models import (
-    PUBLISH_REQUIRED_FIELDS,
-    QA_CHECKLIST_ITEMS,
+    OPEN_RELEASE_STATUSES,
     AccessRequest,
     Collection,
     Dashboard,
     Dataset,
     DatasetDownload,
     DatasetFile,
+    DatasetRelease,
+    DatasetReleaseFile,
+    ReleaseStatus,
 )
 from .permissions import can_download, can_edit_dataset, visible_datasets_for
 from .previews import PreviewError, UnsupportedFormat, table_page
@@ -35,7 +42,13 @@ from .serializers import (
     CollectionSerializer,
     DashboardSerializer,
     DatasetFileSerializer,
+    DatasetReleaseCreateSerializer,
+    DatasetReleaseFileSerializer,
+    DatasetReleaseSerializer,
     DatasetSerializer,
+    ReleaseChecklistSerializer,
+    ReleaseMetadataSerializer,
+    ReleaseTransitionSerializer,
 )
 
 MODULE_TAG = "Module C — Data Repository"
@@ -94,24 +107,13 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
 
     def publish_blocker(self, obj):
         """The PRI Data Framework's publishing gate: one sentence naming everything still missing."""
-        problems = []
-        if obj.status != WorkflowStatus.APPROVED:
-            problems.append(f"it must be approved first (it is {obj.get_status_display().lower()})")
-        empty = [name for name in PUBLISH_REQUIRED_FIELDS if getattr(obj, name) in (None, "")]
-        if empty:
-            problems.append("these fields are empty: " + ", ".join(empty))
-        if obj.source_tier == "4":
-            problems.append("tier 4 sources (news, unverified files) are never published")
-        labelled = {e.get("name") for e in obj.column_dictionary or [] if str(e.get("label") or "").strip()}
-        unlabelled = [c for c in obj.columns or [] if c not in labelled]
-        if unlabelled:
-            problems.append("these columns have no label in the column dictionary: " + ", ".join(unlabelled))
-        if (obj.qa_report or {}).get("passed") is not True:
-            problems.append("the automated QA report has not passed (run `pri publish --check`)")
-        checklist = obj.qa_checklist or {}
-        open_items = [key for key, _ in QA_CHECKLIST_ITEMS if checklist.get(key) is not True]
-        if open_items:
-            problems.append("the QA checklist is not complete (open: " + ", ".join(open_items) + ")")
+        status_ok = obj.status == WorkflowStatus.APPROVED or (
+            f"it must be approved first (it is {obj.get_status_display().lower()})"
+        )
+        problems = releases.publishing_problems(
+            status_ok=status_ok, value=lambda name: getattr(obj, name), columns=obj.columns,
+            column_dictionary=obj.column_dictionary, qa_report=obj.qa_report, qa_checklist=obj.qa_checklist,
+        )
         if not problems:
             return None
         return "This dataset can't be published yet: " + "; ".join(problems) + "."
@@ -142,6 +144,11 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
     def get_permissions(self):
         if self.action in ("add_file", "remove_file"):
             # Who may change the files is decided per dataset by can_edit_dataset (see _editable_dataset).
+            return [IsAuthenticated()]
+        if self.action in ("releases", "release_detail"):
+            # Anyone who can see the dataset reads its published releases; writes are decided per release below.
+            return [IsAuthenticatedOrReadOnly()]
+        if self.action in ("release_add_file", "release_transition"):
             return [IsAuthenticated()]
         if self.action == "request_access":
             # Any authenticated user (including the "public"/Donor-Visitor role) may request
@@ -249,6 +256,177 @@ class DatasetViewSet(WorkflowViewSetMixin, ModelViewSet):
         )
         extra.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # ------------------------------------------------------------------ releases (B4, #125)
+    def _release(self, request, dataset, release_id):
+        release = DatasetRelease.objects.filter(dataset=dataset, pk=release_id).prefetch_related("files").first()
+        if release is None or not releases.can_see_release(request.user, release):
+            return None
+        return release
+
+    def _release_audit(self, request, action_name, release, **metadata):
+        AuditLog.objects.create(
+            actor=request.user, module="datarepo", action=action_name, target=f"datasetrelease:{release.pk}",
+            metadata={"dataset": release.dataset.slug, "version": release.version, **metadata},
+        )
+
+    def _uploads(self, request):
+        """Release files sent as files[<format>]."""
+        uploads = {}
+        for key, upload in request.FILES.items():
+            match = re.fullmatch(r"files\[(\w+)\]", key)
+            if not match or match.group(1) not in dict(Dataset.FORMAT_CHOICES):
+                raise ValidationError({"files": f"Unexpected file field {key!r}: use files[<format>]."})
+            uploads[match.group(1)] = upload
+        return uploads
+
+    @extend_schema(methods=["GET"], responses=DatasetReleaseSerializer(many=True))
+    @extend_schema(methods=["POST"], request={"multipart/form-data": DatasetReleaseCreateSerializer},
+                   responses={201: DatasetReleaseSerializer})
+    @action(detail=True, methods=["get", "post"], url_path="releases")
+    def releases(self, request, slug=None):
+        """GET: the version history (published releases, newest first; staff and the creator also see the others).
+        POST: a new version of a published dataset, as multipart `version`, `changelog`, `format` (main file),
+        `metadata` (JSON) and `files[<format>]`; the main format's file is required."""
+        dataset = self.get_object()
+        if request.method == "GET":
+            visible = [r for r in dataset.releases.prefetch_related("files")
+                       if releases.can_see_release(request.user, r)]
+            return Response(DatasetReleaseSerializer(visible, many=True, context={"request": request}).data)
+
+        if not releases.can_release(request.user, dataset):
+            self.permission_denied(request, message="You can't post releases of this dataset.")
+        if dataset.status != WorkflowStatus.PUBLISHED:
+            return Response({"detail": "Releases refresh published datasets; edit this one directly."}, status=400)
+        open_release = dataset.releases.filter(status__in=OPEN_RELEASE_STATUSES).first()
+        if open_release:
+            state = open_release.get_status_display().lower()
+            return Response({"detail": f"Release {open_release.version} is still {state}; publish, reject or delete "
+                             "it first."}, status=400)
+        form = DatasetReleaseCreateSerializer(data=request.data, context={"dataset": dataset})
+        form.is_valid(raise_exception=True)
+        metadata = form.validated_data.get("metadata") or {}
+        meta = ReleaseMetadataSerializer(dataset, data=metadata, partial=True, context={"request": request})
+        if not meta.is_valid():
+            raise ValidationError({"metadata": meta.errors})
+        uploads = self._uploads(request)
+        main_format = form.validated_data["format"]
+        if main_format not in uploads:
+            raise ValidationError({"files": f"Send the main file as files[{main_format}]."})
+        stored = []
+        try:
+            with transaction.atomic():
+                releases.ensure_baseline(dataset)
+                release = DatasetRelease.objects.create(
+                    dataset=dataset, version=form.validated_data["version"],
+                    changelog=form.validated_data["changelog"], format=main_format, metadata=metadata,
+                    created_by=request.user,
+                )
+                for fmt, upload in uploads.items():
+                    sha256 = releases.sha256_of(upload)
+                    saved = DatasetReleaseFile.objects.create(release=release, format=fmt, file=upload,
+                                                              size=upload.size, sha256=sha256)
+                    stored.append(saved.file)
+                # The dictionary must name columns of the new file, which is profiled once stored.
+                releases.profile_release(release)
+                named = [e.get("name") for e in metadata.get("column_dictionary") or [] if isinstance(e, dict)]
+                missing = [name for name in named if release.columns and name not in release.columns]
+                if missing:
+                    problem = f"Not columns of the file: {', '.join(missing)}."
+                    raise ValidationError({"metadata": {"column_dictionary": problem}})
+                self._release_audit(request, "release_created", release)
+        except ValidationError:
+            for f in stored:  # the rows were rolled back; the stored files go too
+                f.storage.delete(f.name)
+            raise
+        return Response(DatasetReleaseSerializer(release, context={"request": request}).data, status=201)
+
+    @extend_schema(methods=["GET"], responses=DatasetReleaseSerializer)
+    @extend_schema(methods=["PATCH"], request=ReleaseChecklistSerializer, responses=DatasetReleaseSerializer)
+    @extend_schema(methods=["DELETE"], request=None, responses={204: None})
+    @action(detail=True, methods=["get", "patch", "delete"], url_path=r"releases/(?P<release_id>\d+)")
+    def release_detail(self, request, slug=None, release_id=None):
+        """GET one release. PATCH: editors tick its QA checklist. DELETE: its creator while it is a draft, editors and
+        admins until it is published (the pipeline replaces a draft by deleting it and posting again)."""
+        dataset = self.get_object()
+        release = self._release(request, dataset, release_id)
+        if release is None:
+            return Response({"detail": "No such release of this dataset."}, status=404)
+        if request.method == "GET":
+            return Response(DatasetReleaseSerializer(release, context={"request": request}).data)
+        staff = request.user.role in STAFF_ROLES
+        if request.method == "PATCH":
+            if not staff:
+                self.permission_denied(request, message="Only editors and admins complete the QA checklist.")
+            if release.status not in OPEN_RELEASE_STATUSES:
+                return Response({"detail": f"This release is {release.status}; its checklist is closed."}, status=400)
+            form = ReleaseChecklistSerializer(data=request.data, context={"request": request})
+            form.is_valid(raise_exception=True)
+            release.qa_checklist = form.validated_data["qa_checklist"]
+            release.save(update_fields=["qa_checklist", "updated_at"])
+            return Response(DatasetReleaseSerializer(release, context={"request": request}).data)
+        own_draft = release.status == ReleaseStatus.DRAFT and release.created_by_id == request.user.id
+        if not (own_draft or (staff and release.status != ReleaseStatus.PUBLISHED)):
+            self.permission_denied(request, message="You can't delete this release.")
+        self._release_audit(request, "release_deleted", release, status=release.status)
+        release.delete()  # stored files go too, unless the dataset or another release still uses them
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(request={"multipart/form-data": DatasetReleaseFileSerializer},
+                   responses={201: DatasetReleaseFileSerializer})
+    @action(detail=True, methods=["post"], url_path=r"releases/(?P<release_id>\d+)/files")
+    def release_add_file(self, request, slug=None, release_id=None):
+        """Add another format to a draft release (one request per file keeps each upload under the 50 MB limit)."""
+        dataset = self.get_object()
+        release = self._release(request, dataset, release_id)
+        if release is None:
+            return Response({"detail": "No such release of this dataset."}, status=404)
+        own = release.created_by_id == request.user.id or request.user.role in STAFF_ROLES
+        if not own or release.status != ReleaseStatus.DRAFT:
+            self.permission_denied(request, message="Files can be added to a draft release by its creator or staff.")
+        form = DatasetReleaseFileSerializer(data=request.data, context={"release": release})
+        form.is_valid(raise_exception=True)
+        added = form.save(release=release)
+        self._release_audit(request, "release_file_added", release, format=added.format)
+        return Response(DatasetReleaseFileSerializer(added).data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(request=ReleaseTransitionSerializer, responses=DatasetReleaseSerializer)
+    @action(detail=True, methods=["post"], url_path=r"releases/(?P<release_id>\d+)/transition")
+    def release_transition(self, request, slug=None, release_id=None):
+        """Move a release through review: draft -> in_review (its creator or staff), then approved, published,
+        rejected or back to draft (editors and admins), with the dataset's gate and two-person rule."""
+        dataset = self.get_object()
+        release = self._release(request, dataset, release_id)
+        if release is None:
+            return Response({"detail": "No such release of this dataset."}, status=404)
+        form = ReleaseTransitionSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        target = form.validated_data["status"]
+        submit = release.status == ReleaseStatus.DRAFT and target == ReleaseStatus.IN_REVIEW
+        allowed = request.user.role in STAFF_ROLES or (
+            submit and release.created_by_id == request.user.id and request.user.role in CONTRIBUTOR_ROLES
+        )
+        if not allowed:
+            self.permission_denied(request, message="Only editors and admins review releases.")
+        blocker = releases.release_transition_blocker(release, target, request.user)
+        if blocker:
+            return Response({"detail": blocker}, status=400)
+        previous = release.status
+        if target == ReleaseStatus.PUBLISHED:
+            meta = ReleaseMetadataSerializer(dataset, data=release.metadata, partial=True, context={"request": request})
+            if not meta.is_valid():
+                return Response({"detail": "The release's metadata no longer fits the dataset.",
+                                 "metadata": meta.errors}, status=400)
+            releases.publish(release, meta)
+        else:
+            release.status = target
+            if target == ReleaseStatus.APPROVED:
+                release.approved_by, release.approved_at = request.user, timezone.now()
+            elif target in (ReleaseStatus.DRAFT, ReleaseStatus.IN_REVIEW):
+                release.approved_by, release.approved_at = None, None
+            release.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
+        self._release_audit(request, "release_transition", release, previous_status=previous, new_status=target)
+        return Response(DatasetReleaseSerializer(release, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="request-access")
     def request_access(self, request, slug=None):

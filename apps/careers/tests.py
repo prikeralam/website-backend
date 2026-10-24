@@ -40,7 +40,7 @@ class ApplicationSubmissionTests(APITestCase):
             "full_name": " Asha K ",
             "email": "asha@example.org",
             "cv": pdf(),
-            "sop": SimpleUploadedFile("sop.docx", DOCX),
+            "cover_letter": SimpleUploadedFile("letter.docx", DOCX),
             **extra,
         }
         return self.client.post("/api/v1/apply/", data, format="multipart")
@@ -51,7 +51,8 @@ class ApplicationSubmissionTests(APITestCase):
         stored = Application.objects.get()
         self.assertEqual((stored.kind, stored.full_name, stored.status), ("fellowship", "Asha K", "new"))
         self.assertRegex(stored.cv.name, r"^applications/[0-9a-f]{32}\.pdf$")
-        self.assertRegex(stored.sop.name, r"^applications/[0-9a-f]{32}\.docx$")
+        self.assertRegex(stored.cover_letter.name, r"^applications/[0-9a-f]{32}\.docx$")
+        self.assertFalse(stored.writing_sample)
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ["contact@priresearch.in"])
         self.assertEqual(mail.outbox[0].reply_to, ["asha@example.org"])
@@ -77,14 +78,34 @@ class ApplicationSubmissionTests(APITestCase):
         self.assertEqual(self.apply(job="analyst").status_code, 201)
         self.assertIsNone(Application.objects.get().job)
 
-    def test_both_files_are_required(self):
+    def test_cv_and_cover_letter_are_required(self):
         response = self.client.post(
             "/api/v1/apply/",
             {"kind": "internship", "full_name": "A", "email": "a@example.org", "cv": pdf()},
             format="multipart",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("sop", response.data)
+        self.assertIn("cover_letter", response.data)
+
+    def test_a_writing_sample_is_optional_unless_the_role_requires_it(self):
+        self.assertEqual(self.apply(kind="job", job="analyst").status_code, 201)
+        JobOpening.objects.create(slug="research-assistant", title="Research Assistant", status="published",
+                                  writing_sample="required", created_by=self.owner)
+        response = self.apply(kind="job", job="research-assistant", email="b@example.org")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("asks for a writing sample", str(response.data["writing_sample"]))
+        response = self.apply(kind="job", job="research-assistant", email="b@example.org",
+                              writing_sample=pdf("essay.pdf"))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertRegex(Application.objects.get(job__slug="research-assistant").writing_sample.name,
+                         r"^applications/[0-9a-f]{32}\.pdf$")
+        self.assertIn("writing sample", mail.outbox[-1].body)
+
+    def test_fellowships_may_send_a_writing_sample_checked_like_the_others(self):
+        self.assertEqual(self.apply(writing_sample=pdf("essay.pdf")).status_code, 201)
+        response = self.apply(email="c@example.org", writing_sample=SimpleUploadedFile("essay.exe", b"MZ"))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("writing_sample", response.data)
 
     def test_rejects_other_file_types(self):
         response = self.apply(cv=SimpleUploadedFile("cv.exe", b"MZ\x90\x00"))
@@ -97,9 +118,9 @@ class ApplicationSubmissionTests(APITestCase):
         self.assertIn("cv", response.data)
 
     def test_rejects_files_over_5_mb(self):
-        response = self.apply(sop=pdf("sop.pdf", PDF + b"0" * (5 * 1024 * 1024)))
+        response = self.apply(cover_letter=pdf("letter.pdf", PDF + b"0" * (5 * 1024 * 1024)))
         self.assertEqual(response.status_code, 400)
-        self.assertIn("sop", response.data)
+        self.assertIn("cover_letter", response.data)
 
     def test_honeypot_answers_success_and_keeps_nothing(self):
         self.assertEqual(self.apply(website="spam.example").status_code, 201)
@@ -124,7 +145,7 @@ class ApplicationInboxTests(APITestCase):
         self.editor = User.objects.create_user(username="editor1", password="pw12345", role="editor")
         self.researcher = User.objects.create_user(username="researcher", password="pw12345", role="researcher")
         self.application = Application.objects.create(
-            kind="internship", full_name="Ravi", email="ravi@example.org", cv=pdf(), sop=pdf("sop.pdf")
+            kind="internship", full_name="Ravi", email="ravi@example.org", cv=pdf(), cover_letter=pdf("letter.pdf")
         )
 
     def test_staff_list_applications_without_file_links(self):
@@ -132,14 +153,21 @@ class ApplicationInboxTests(APITestCase):
         row = self.client.get("/api/v1/applications/").data["results"][0]
         self.assertEqual((row["full_name"], row["kind"], row["status"]), ("Ravi", "internship", "new"))
         self.assertNotIn("cv", row)
-        self.assertNotIn("sop", row)
+        self.assertNotIn("cover_letter", row)
+        self.assertFalse(row["has_writing_sample"])
 
-    def test_staff_open_the_cv_and_sop(self):
+    def test_staff_open_the_cv_cover_letter_and_writing_sample(self):
         self.client.force_authenticate(self.editor)
-        for document in ["cv", "sop"]:
-            response = self.client.get(f"/api/v1/applications/{self.application.pk}/files/{document}/")
+        url = f"/api/v1/applications/{self.application.pk}/files/"
+        self.assertEqual(self.client.get(f"{url}writing_sample/").status_code, 404)
+        self.application.writing_sample = pdf("essay.pdf")
+        self.application.save()
+        for document in ["cv", "cover_letter", "writing_sample"]:
+            response = self.client.get(f"{url}{document}/")
             self.assertEqual(response.status_code, 200)
             self.assertIn("/applications/", response.data["file"])
+        self.assertEqual(self.client.get(f"{url}sop/").status_code, 404)
+        self.assertTrue(self.client.get("/api/v1/applications/").data["results"][0]["has_writing_sample"])
 
     def test_others_cannot_see_applications_or_their_files(self):
         for user in [None, self.researcher]:
@@ -160,6 +188,7 @@ class ApplicationInboxTests(APITestCase):
         self.assertTrue(AuditLog.objects.filter(action="application_status", module="careers").exists())
 
 
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class JobOpeningTests(APITestCase):
     def test_editors_create_openings_that_appear_once_published(self):
         editor = User.objects.create_user(username="editor1", password="pw12345", role="editor")
@@ -173,6 +202,39 @@ class JobOpeningTests(APITestCase):
         self.assertEqual(self.client.get("/api/v1/jobs/").data["results"], [])
         JobOpening.objects.filter(slug="ra").update(status="published", published_at=timezone.now())
         self.assertEqual(self.client.get("/api/v1/jobs/ra/").data["title"], "Research Associate")
+
+    def opening(self):
+        editor = User.objects.create_user(username="editor2", password="pw12345", role="editor")
+        self.client.force_authenticate(editor)
+        response = self.client.post("/api/v1/jobs/", {"slug": "research-assistant", "title": "Research Assistant",
+                                                      "writing_sample": "required"}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        return editor
+
+    def test_editors_upload_a_job_description_pdf_the_public_can_read(self):
+        self.opening()
+        response = self.client.patch("/api/v1/jobs/research-assistant/",
+                                     {"description_pdf": pdf("jd.pdf")}, format="multipart")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn("/jobs/", response.data["description_pdf"])
+        self.assertEqual(response.data["writing_sample"], "required")
+        JobOpening.objects.filter(slug="research-assistant").update(status="published", published_at=timezone.now())
+        self.client.force_authenticate(None)
+        self.assertIn("/jobs/", self.client.get("/api/v1/jobs/research-assistant/").data["description_pdf"])
+
+    def test_the_job_description_must_be_a_real_pdf_and_null_removes_it(self):
+        self.opening()
+        url = "/api/v1/jobs/research-assistant/"
+        for bad in [SimpleUploadedFile("jd.docx", DOCX), pdf("jd.pdf", b"MZ\x90\x00 not a pdf")]:
+            response = self.client.patch(url, {"description_pdf": bad}, format="multipart")
+            self.assertEqual(response.status_code, 400, bad.name)
+        self.client.patch(url, {"description_pdf": pdf("jd.pdf")}, format="multipart")
+        response = self.client.patch(url, {"description_pdf": None}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["description_pdf"])
+
+    def test_writing_sample_defaults_to_optional(self):
+        self.assertEqual(JobOpening.objects.model._meta.get_field("writing_sample").default, "optional")
 
 
 class InitialOpeningsMigrationTests(APITestCase):
